@@ -34,7 +34,7 @@ echo.
 
 echo Menjalankan server produksi di jendela terpisah...
 call npx kill-port 4000 >nul 2>nul
-start "SIKAS MUHIWA - Server Produksi (JANGAN DITUTUP)" cmd /k "set NODE_ENV=production && node server\src\server.js"
+start "SIKAS MUHIWA - Server Produksi (JANGAN DITUTUP)" cmd /k "set NODE_ENV=production&&node server\src\server.js"
 
 set "API_PORT=4000"
 set "MAX_WAIT=30"
