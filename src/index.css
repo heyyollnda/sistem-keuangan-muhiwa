@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+/* Brand teal spectrum — anchored to the school logo's teal badge (~brand-600)
+   and the supplied near-white swatch (brand-50). Replaces slate/emerald everywhere. */
+@theme {
+  --color-brand-50: #f5faf9;
+  --color-brand-100: #eaf6f3;
+  --color-brand-200: #d0ece6;
+  --color-brand-300: #a6ded3;
+  --color-brand-400: #6ecfbb;
+  --color-brand-500: #33c1a5;
+  --color-brand-600: #1c927a;
+  --color-brand-700: #137663;
+  --color-brand-800: #0e5d4d;
+  --color-brand-900: #094338;
+  --color-brand-950: #052922;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: #f5faf9;
+}
+
+@media print {
+  @page {
+    size: auto;
+    margin: 10mm;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .receipt-print-area,
+  .receipt-print-area * {
+    visibility: visible;
+  }
+
+  /* The receipt modal is normally a fixed, flex-centered overlay with a
+     height-capped scroll container — on screen that's fine, but centering
+     it wastes vertical space above the content and the capped height clips
+     it, which pushes the receipt onto a second printed page. Anchor it to
+     the top of the page and remove the cap so it prints as one flat block. */
+  .receipt-modal-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    background: none;
+    padding: 0;
+  }
+  .receipt-modal-card {
+    max-height: none;
+    overflow: visible;
+    box-shadow: none;
+    border-radius: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+  .receipt-print-area {
+    width: 100%;
+    padding: 0;
+    /* A4 (297mm) minus the 10mm @page margin on top and bottom — hard cap so the
+       receipt can never spill onto a second page, no matter how many line items
+       it has. Content is also scaled to fit this in the PDF export path. */
+    max-height: 277mm;
+    overflow: hidden;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .receipt-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .report-print-area,
+  .report-print-area * {
+    visibility: visible;
+  }
+  .report-print-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 1rem;
+  }
+  /* Long tables must paginate cleanly across multiple printed pages: repeat the header
+     row on every page and never split a single data row across a page break. */
+  .report-print-area table {
+    page-break-inside: auto;
+    table-layout: fixed;
+    width: 100%;
+    font-size: 10px;
+  }
+  .report-print-area thead {
+    display: table-header-group;
+  }
+  .report-print-area tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* The scrollable wrapper and nowrap cells exist for on-screen horizontal scrolling —
+     in print there's no scrolling, so both would silently clip columns past the page
+     edge. Let columns wrap and share the fixed page width instead. */
+  .report-print-area .overflow-x-auto {
+    overflow: visible;
+  }
+  .report-print-area th,
+  .report-print-area td {
+    white-space: normal !important;
+    word-break: break-word;
+    padding: 6px 8px;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}

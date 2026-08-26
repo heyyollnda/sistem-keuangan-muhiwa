@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Environment files hold real credentials (server/.env: STAFF_USERNAME/STAFF_PASSWORD) —
+# never commit them. This only matches files literally named ".env", so ".env.example"
+# stays tracked.
+.env
+
+# SQLite database file — only schema.sql/seed.js are tracked, the actual data stays local
+server/db/*.db
+
+# Local database backups (see backups/README or the root README's backup section) — purely
+# local safety copies, not meant for version control.
+backups/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

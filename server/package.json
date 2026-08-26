@@ -1,0 +1,24 @@
+{
+  "name": "sekolah-keuangan-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "predev": "npx kill-port 4000",
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "seed": "node db/seed.js",
+    "reset-data": "node db/reset-dummy-data.js",
+    "migrate-program-keahlian": "node db/migrate-rename-program-keahlian.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.9.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
