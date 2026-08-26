@@ -34,7 +34,13 @@ echo.
 
 echo Menjalankan server produksi di jendela terpisah...
 call npx kill-port 4000 >nul 2>nul
-start "SIKAS MUHIWA - Server Produksi (JANGAN DITUTUP)" cmd /k "set NODE_ENV=production && node server\src\server.js"
+rem Set in THIS script's own environment, not inline inside the spawned cmd /k string -
+rem "start" child processes inherit the parent's environment automatically, so this avoids
+rem both the classic "trailing space in SET value" bug (a space before && gets captured as
+rem part of the value, so NODE_ENV becomes "production " != "production") and the nested-
+rem quote ambiguity of trying to quote a SET assignment inside an already-quoted cmd /k string.
+set "NODE_ENV=production"
+start "SIKAS MUHIWA - Server Produksi (JANGAN DITUTUP)" cmd /k node server\src\server.js
 
 set "API_PORT=4000"
 set "MAX_WAIT=30"

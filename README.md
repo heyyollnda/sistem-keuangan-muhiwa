@@ -1,5 +1,9 @@
 # React + TypeScript + Vite
 
+> **Dokumen serah terima:** lihat [HANDOVER.md](HANDOVER.md) (untuk developer/kontak
+> teknis berikutnya) dan [PANDUAN-DARURAT.md](PANDUAN-DARURAT.md) (panduan sederhana
+> untuk staf sekolah non-teknis bila terjadi masalah).
+
 ## Cara Menjalankan Aplikasi
 
 Ada **dua mode** yang terpisah sama sekali — dipakai oleh dua orang berbeda untuk tujuan
