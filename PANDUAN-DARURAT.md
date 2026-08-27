@@ -82,6 +82,47 @@ berbahaya — aplikasi akan tetap bisa dibuka normal keesokan harinya.
 
 ---
 
+## Menjaga Data Tetap Aman (Rutinitas Mingguan)
+
+**Kenapa ini penting:** Data pembayaran siswa saat ini hanya tersimpan di komputer ini
+saja. Kalau komputer ini suatu saat rusak parah atau hilang, data pembayaran bisa hilang
+seluruhnya kalau tidak punya salinannya di tempat lain. Menyalin folder "backups" setiap
+minggu adalah cara paling sederhana untuk menjaga supaya itu tidak terjadi.
+
+**Kapan:** Setiap **Jumat sore**, sebelum pulang kerja (atau hari lain yang sudah
+disepakati dengan developer).
+
+**Langkah-langkah (bisa disalin ke flashdisk ATAU Google Drive sekolah, salah satu saja
+sudah cukup):**
+
+### Cara 1 — Menyalin ke Flashdisk
+
+1. Colokkan flashdisk ke komputer.
+2. Buka folder aplikasi, cari folder bernama **"backups"**
+   (lokasinya: `D:\SIKAS-MUHIWA\backups`).
+3. Klik kanan folder **"backups"** tersebut → pilih **Copy**.
+4. Buka flashdisk-nya lewat File Explorer (biasanya muncul di "This PC").
+5. Di dalam flashdisk, klik kanan area kosong → pilih **Paste**.
+6. Tunggu sampai proses penyalinan selesai (muncul bar loading), lalu flashdisk boleh
+   dicabut dengan aman.
+
+### Cara 2 — Menyalin ke Google Drive Sekolah
+
+1. Buka folder aplikasi, cari folder bernama **"backups"**
+   (lokasinya: `D:\SIKAS-MUHIWA\backups`).
+2. Klik kanan folder **"backups"** tersebut → pilih **Copy**.
+3. Buka aplikasi/website Google Drive sekolah, masuk ke folder yang sudah ditentukan
+   untuk menyimpan salinan ini.
+4. Klik kanan area kosong di dalam folder Google Drive tersebut → pilih **Paste**
+   (atau kalau di website, cari tombol "Upload" lalu pilih folder "backups" tadi).
+5. Tunggu sampai proses upload selesai sebelum menutup jendelanya.
+
+**Catatan:** tidak perlu menghapus salinan minggu lalu — biarkan menumpuk, supaya kalau
+ada masalah bisa pilih salinan dari tanggal yang tepat. Kalau bingung atau langkah di
+atas tidak berhasil, hubungi developer (kontak di bawah), jangan dipaksakan sendiri.
+
+---
+
 ## Siapa yang harus saya hubungi kalau ada masalah yang tidak ada di panduan ini?
 
 📱 **Linda (developer)** — WhatsApp **085794824132** — Email **lindafitrianii004@gmail.com**

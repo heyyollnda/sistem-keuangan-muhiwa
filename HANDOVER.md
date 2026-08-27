@@ -66,10 +66,11 @@ Ini gotcha klasik `cmd.exe`: perintah `set VAR=value` menangkap **semua karakter
 (ada spasi di akhir) alih-alih persis `"production"`. Akibatnya pengecekan
 `process.env.NODE_ENV === 'production'` di `server/src/app.js` bernilai salah.
 
-**Solusi (sudah diterapkan):** `NODE_ENV` di-set di baris terpisah dengan bentuk aman
-`set "NODE_ENV=production"` **sebelum** memanggil `start`, bukan digabung inline dengan
-`&&` dalam satu baris — proses yang di-`start` otomatis mewarisi environment dari script
-induknya, jadi tidak perlu inline sama sekali. Lihat `Jalankan-SIKAS-Produksi.bat`.
+**Solusi (sudah diterapkan & teruji langsung di Windows sungguhan, 26 Agustus 2026):**
+tulis tanpa spasi sama sekali di sekitar `&&` — `set NODE_ENV=production&&node ...` —
+supaya tidak ada spasi yang ikut tertangkap sebagai bagian nilai `NODE_ENV`. Lihat baris
+`start "..." cmd /k "set NODE_ENV=production&&node server\src\server.js"` di
+`Jalankan-SIKAS-Produksi.bat`.
 
 ### Instalasi `better-sqlite3` gagal di Windows dengan Node.js versi sangat baru
 
@@ -171,3 +172,33 @@ Lihat README.md bagian **"Cara Memindahkan Aplikasi ke Komputer Baru (Sekolah)"*
 langkah lengkap instalasi Node.js, clone repository, install dependency, dan konfigurasi
 `server/.env`. Kalau ada backup terakhir dari komputer lama, ikut disalin sesuai langkah
 opsional di bagian tersebut supaya data tidak perlu diinput ulang dari awal.
+
+## 6. Keterbatasan Sistem Saat Ini & Rekomendasi Pengembangan Lanjutan
+
+### Backup masih tersimpan di komputer yang sama dengan database asli
+
+Mekanisme backup otomatis (folder `backups/`, lihat README.md bagian "Backup database")
+melindungi dari kesalahan/korupsi data di level file, tapi **tidak** melindungi dari
+kerusakan atau kehilangan fisik komputer itu sendiri — backup dan database asli sama-sama
+ada di hard disk yang sama. Kalau komputer sekolah rusak total, hilang, atau dicuri,
+backup ikut hilang bersamaan dengan database aslinya.
+
+Mitigasi sementara: PANDUAN-DARURAT.md bagian "Menjaga Data Tetap Aman" mengarahkan staf
+menyalin folder `backups/` secara manual ke flashdisk/Google Drive setiap minggu.
+
+**Rekomendasi pengembangan lanjutan:** bangun mekanisme backup otomatis ke lokasi
+terpisah dari komputer sekolah — misalnya upload otomatis ke layanan cloud (Google Drive
+API, atau storage serupa) setiap kali backup lokal dibuat, supaya tidak lagi bergantung
+pada staf mengingat untuk menyalin manual.
+
+### Belum ada fitur export data ke Excel/CSV dari dalam aplikasi
+
+Saat ini, mengambil data mentah (daftar siswa, riwayat transaksi) di luar tampilan Rekap
+Laporan yang sudah ada memerlukan membuka file `server/db/sekolah-keuangan.db` langsung
+pakai software khusus (mis. "DB Browser for SQLite") — tidak praktis untuk staf non-teknis,
+dan berisiko kalau file diedit langsung secara tidak sengaja.
+
+**Rekomendasi pengembangan lanjutan:** tambahkan tombol export (ke Excel/CSV) di halaman
+Rekap Laporan — untuk daftar siswa, riwayat transaksi, dan rekap tunggakan — supaya staf
+bisa mengambil salinan data sendiri tanpa alat tambahan, mirip pola yang sudah ada untuk
+fitur Import Siswa (`src/lib/studentImport.ts`) tapi arah sebaliknya.
