@@ -36,6 +36,7 @@ export default function ClassRecap() {
   const now = new Date()
   const [selectedGrade, setSelectedGrade] = useState<Grade>('Kelas 10')
   const [majorFilter, setMajorFilter] = useState<'all' | ProgramKeahlian>('all')
+  const [nameSearch, setNameSearch] = useState('')
   const [semesterType, setSemesterType] = useState<SemesterType>(now.getMonth() >= 6 ? 'ganjil' : 'genap')
   const [semesterYear, setSemesterYear] = useState(now.getFullYear())
   const [customFrom, setCustomFrom] = useState('')
@@ -98,6 +99,14 @@ export default function ClassRecap() {
     }
   }, [selectedGrade, majorFilter, range])
 
+  // Works alongside the Kelas/Program Keahlian/Semester filters above (all already applied
+  // server-side) — this one's purely a client-side name filter over the resulting rows.
+  const filteredData = useMemo(() => {
+    const q = nameSearch.trim().toLowerCase()
+    if (!q) return data
+    return data.filter((row) => row.student.name.toLowerCase().includes(q))
+  }, [data, nameSearch])
+
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -124,7 +133,17 @@ export default function ClassRecap() {
             <Printer size={14} /> Cetak Rekap Kelas
           </button>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Cari Nama Siswa</label>
+            <input
+              type="text"
+              value={nameSearch}
+              onChange={(e) => setNameSearch(e.target.value)}
+              placeholder="Cari Nama Siswa..."
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Kelas</label>
             <select
@@ -209,7 +228,12 @@ export default function ClassRecap() {
         </p>
       </section>
 
-      <div className={printStudent ? '' : 'report-print-area'}>
+      {/* Per-student print (printStudent set) must not contribute any layout height to the
+          print document — `no-print` (display: none) removes it entirely, unlike just
+          withholding the `report-print-area` visibility-override class, which would leave this
+          whole class list (all ~N student cards) sitting invisible-but-still-occupying-space in
+          normal flow and inflating the printed page count well past the intended single page. */}
+      <div className={printStudent ? 'no-print' : 'report-print-area'}>
         <div className="hidden print:flex flex-col items-center text-center mb-4">
           <SchoolLogo size={40} />
           <h2 className="font-bold text-slate-800 mt-1">SMK Muhammadiyah 1 Wates</h2>
@@ -236,7 +260,12 @@ export default function ClassRecap() {
               Tidak ada siswa di {classLabel}.
             </div>
           )}
-          {!loading && !error && data.map((row) => {
+          {!loading && !error && data.length > 0 && filteredData.length === 0 && (
+            <div className="no-print rounded-2xl bg-white border border-slate-200 p-8 text-center text-slate-400 text-sm">
+              Tidak ada siswa yang cocok dengan pencarian &quot;{nameSearch}&quot;.
+            </div>
+          )}
+          {!loading && !error && filteredData.map((row) => {
             const isOpen = expanded.has(row.student.id)
             const meta = STATUS_META[row.status]
             return (
