@@ -300,7 +300,7 @@ export default function PaymentForm() {
                       >
                         <span className="flex items-center gap-2 min-w-0">
                           <span className="font-medium text-slate-700 truncate">{s.name}</span>
-                          {s.status === 'lulus' && <StudentStatusBadge status={s.status} />}
+                          {s.status !== 'aktif' && <StudentStatusBadge status={s.status} />}
                         </span>
                         <span className="text-xs text-slate-400 shrink-0 text-right">
                           {s.grade}
@@ -318,7 +318,7 @@ export default function PaymentForm() {
                       {selectedStudent.name} — NISN {selectedStudent.nisn} ({selectedStudent.grade} &middot;{' '}
                       {selectedStudent.programKeahlian})
                     </span>
-                    {selectedStudent.status === 'lulus' && <StudentStatusBadge status={selectedStudent.status} />}
+                    {selectedStudent.status !== 'aktif' && <StudentStatusBadge status={selectedStudent.status} />}
                   </div>
                 )}
               </div>
@@ -328,7 +328,7 @@ export default function PaymentForm() {
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Kelas</label>
                   <select
                     value={grade}
-                    disabled={selectedStudent?.status === 'lulus'}
+                    disabled={selectedStudent != null && selectedStudent.status !== 'aktif'}
                     onChange={(e) => {
                       setGrade(e.target.value as Grade)
                       setCheckedCategories(new Set())
@@ -344,6 +344,9 @@ export default function PaymentForm() {
                   </select>
                   {selectedStudent?.status === 'lulus' && (
                     <p className="text-xs text-slate-400 mt-1">Siswa alumni — kelas dikunci di Kelas 12.</p>
+                  )}
+                  {selectedStudent?.status === 'keluar' && (
+                    <p className="text-xs text-slate-400 mt-1">Siswa sudah keluar — kelas dikunci.</p>
                   )}
                 </div>
                 <div>

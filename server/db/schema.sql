@@ -5,8 +5,9 @@
 
 PRAGMA foreign_keys = ON;
 
--- One row per enrolled/graduated student. `status` distinguishes currently-enrolled ("aktif")
--- from graduated ("lulus") students — alumni rows are never deleted, only their status flips.
+-- One row per enrolled/graduated/withdrawn student. `status` distinguishes currently-enrolled
+-- ("aktif") from graduated ("lulus") and withdrawn-mid-semester ("keluar") students — none of
+-- these rows are ever deleted, only their status flips.
 CREATE TABLE IF NOT EXISTS students (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -17,7 +18,7 @@ CREATE TABLE IF NOT EXISTS students (
   )),
   phone TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'aktif' CHECK (status IN ('aktif', 'lulus')),
+  status TEXT NOT NULL DEFAULT 'aktif' CHECK (status IN ('aktif', 'lulus', 'keluar')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

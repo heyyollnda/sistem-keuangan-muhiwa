@@ -26,11 +26,13 @@ export function CategoryStatusBadge({ status }: { status: CategoryStatus }) {
 const STUDENT_STATUS_STYLES: Record<StudentStatus, string> = {
   aktif: 'bg-slate-100 text-slate-600',
   lulus: 'bg-blue-50 text-blue-700',
+  keluar: 'bg-rose-50 text-rose-600',
 }
 
 const STUDENT_STATUS_LABELS: Record<StudentStatus, string> = {
   aktif: 'Aktif',
   lulus: 'Lulus',
+  keluar: 'Keluar',
 }
 
 /** "Aktif" / "Lulus" — whether a student is currently enrolled or an alumnus. */

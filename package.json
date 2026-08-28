@@ -11,6 +11,7 @@
     "backup": "node server/db/backup.js",
     "reset-data": "node server/db/reset-dummy-data.js",
     "migrate-program-keahlian": "node server/db/migrate-rename-program-keahlian.js",
+    "migrate-status-keluar": "node server/db/migrate-add-status-keluar.js",
     "build": "tsc -b && vite build",
     "build:production": "tsc -b && vite build",
     "lint": "oxlint",

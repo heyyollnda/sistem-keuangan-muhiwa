@@ -28,6 +28,10 @@ export default function Reports() {
   const [categoryFilter, setCategoryFilter] = useState<'all' | string>('all')
   const [dateSort, setDateSort] = useState<'asc' | 'desc'>('desc')
   const [recapStatusFilter, setRecapStatusFilter] = useState<'all' | StudentStatus>('all')
+  // Tracks whether the staff has ever touched this dropdown — until they do, "keluar" students
+  // stay out of the default view (see displayedArrears below) even though the untouched value
+  // is technically 'all'. Manually picking "Semua" (or "Keluar") is what makes them visible.
+  const [recapStatusTouched, setRecapStatusTouched] = useState(false)
 
   // Riwayat Transaksi — filters are sent to the backend as query params (GET /api/transactions)
   // so filtering runs as a SQL WHERE clause, not a client-side scan over the full history.
@@ -172,6 +176,18 @@ export default function Reports() {
   }, [transactions, dateSort])
 
   const totalCollected = filteredTransactions.reduce((s, t) => s + t.totalPaid, 0)
+
+  // Purely a display default, not a recalculation — GET /api/reports/arrears already returned
+  // every matching student (keluar included) since no status filter was sent to the backend
+  // while recapStatusFilter is 'all'. Hiding "keluar" rows here, only until the staff has
+  // manually touched the dropdown, keeps the day-to-day table free of withdrawn students
+  // without ever excluding them from anything that sums arrears across all statuses (Dashboard).
+  const displayedArrears = useMemo(() => {
+    if (recapStatusFilter === 'all' && !recapStatusTouched) {
+      return arrears.filter((row) => row.student.status !== 'keluar')
+    }
+    return arrears
+  }, [arrears, recapStatusFilter, recapStatusTouched])
 
   // Categories are now defined per Kelas + Program Keahlian and can be added/removed freely, so
   // there's no fixed global catalog — derive filter options from feeConfig (already loaded by
@@ -383,17 +399,22 @@ export default function Reports() {
             <div>
               <h2 className="font-semibold text-slate-800">Rekap Tunggakan Siswa</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Menampilkan seluruh siswa — gunakan filter untuk fokus ke siswa aktif atau alumni.
+                Menampilkan siswa aktif &amp; alumni — pilih filter &quot;Keluar&quot; atau &quot;Semua&quot; untuk
+                menampilkan siswa yang sudah keluar juga.
               </p>
             </div>
             <select
               value={recapStatusFilter}
-              onChange={(e) => setRecapStatusFilter(e.target.value as 'all' | StudentStatus)}
+              onChange={(e) => {
+                setRecapStatusTouched(true)
+                setRecapStatusFilter(e.target.value as 'all' | StudentStatus)
+              }}
               className="rounded-lg border border-slate-200 bg-slate-50 py-2 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
             >
               <option value="all">Semua</option>
               <option value="aktif">Aktif</option>
               <option value="lulus">Alumni (Lulus)</option>
+              <option value="keluar">Keluar</option>
             </select>
           </div>
           <div className="overflow-x-auto">
@@ -425,7 +446,7 @@ export default function Reports() {
                     </td>
                   </tr>
                 )}
-                {!arrearsLoading && !arrearsError && arrears.length === 0 && (
+                {!arrearsLoading && !arrearsError && displayedArrears.length === 0 && (
                   <tr>
                     <td colSpan={8} className="px-5 py-8 text-center text-slate-400">
                       Tidak ada siswa yang cocok dengan filter.
@@ -434,7 +455,7 @@ export default function Reports() {
                 )}
                 {!arrearsLoading &&
                   !arrearsError &&
-                  arrears.map(({ student, totalPaid, outstanding, paidCategories, paymentStatus }) => (
+                  displayedArrears.map(({ student, totalPaid, outstanding, paidCategories, paymentStatus }) => (
                   <tr key={student.id} className="hover:bg-slate-50/60">
                     <td className="px-5 py-3 font-medium text-slate-700 whitespace-nowrap">{student.name}</td>
                     <td className="px-5 py-3 whitespace-nowrap text-slate-700">{student.grade}</td>

@@ -23,7 +23,7 @@ function studentToApi(row) {
   }
 }
 
-// GET /api/reports/arrears?status=aktif|lulus&grade= — one row per student with their total
+// GET /api/reports/arrears?status=aktif|lulus|keluar&grade= — one row per student with their total
 // paid, total outstanding, paid-category breakdown and payment status, computed straight from
 // the database (Rekap Tunggakan Siswa).
 router.get(

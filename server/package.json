@@ -10,7 +10,8 @@
     "start": "node src/server.js",
     "seed": "node db/seed.js",
     "reset-data": "node db/reset-dummy-data.js",
-    "migrate-program-keahlian": "node db/migrate-rename-program-keahlian.js"
+    "migrate-program-keahlian": "node db/migrate-rename-program-keahlian.js",
+    "migrate-status-keluar": "node db/migrate-add-status-keluar.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",

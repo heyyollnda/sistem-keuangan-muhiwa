@@ -1,7 +1,8 @@
 export type Grade = 'Kelas 10' | 'Kelas 11' | 'Kelas 12'
 
-/** "aktif" = currently enrolled, "lulus" = graduated/alumni. Alumni are never deleted or hidden. */
-export type StudentStatus = 'aktif' | 'lulus'
+/** "aktif" = currently enrolled, "lulus" = graduated/alumni, "keluar" = withdrew mid-semester.
+ *  None of these are ever deleted or hidden — only the label changes. */
+export type StudentStatus = 'aktif' | 'lulus' | 'keluar'
 
 export type ProgramKeahlian = 'TJKT' | 'PM' | 'MPLB' | 'AKL' | 'KES'
 

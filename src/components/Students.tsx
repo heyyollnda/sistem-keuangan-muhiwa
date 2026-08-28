@@ -2,6 +2,7 @@ import {
   AlertCircle,
   GraduationCap,
   Loader2,
+  LogOut,
   Mail,
   Pencil,
   Phone,
@@ -63,6 +64,7 @@ export default function Students() {
   const [submitting, setSubmitting] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [graduating, setGraduating] = useState(false)
+  const [markingKeluar, setMarkingKeluar] = useState(false)
 
   const [gradeFilter, setGradeFilter] = useState<'all' | Grade>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | StudentStatus>('all')
@@ -75,6 +77,7 @@ export default function Students() {
   const [errors, setErrors] = useState<string[]>([])
   const [confirmDelete, setConfirmDelete] = useState<Student | null>(null)
   const [confirmGraduate, setConfirmGraduate] = useState<Student | null>(null)
+  const [confirmKeluar, setConfirmKeluar] = useState<Student | null>(null)
   const [historyStudent, setHistoryStudent] = useState<Student | null>(null)
 
   const filtered = useMemo(() => {
@@ -200,6 +203,20 @@ export default function Students() {
     }
   }
 
+  const handleMarkKeluar = async () => {
+    if (!confirmKeluar) return
+    setMarkingKeluar(true)
+    try {
+      await updateStudentStatus(confirmKeluar.id, 'keluar')
+      showToast(`${confirmKeluar.name} ditandai sebagai Keluar.`, 'success')
+      setConfirmKeluar(null)
+    } catch (err) {
+      showToast(errorMessage(err, 'Gagal mengubah status siswa.'), 'error')
+    } finally {
+      setMarkingKeluar(false)
+    }
+  }
+
   const txCountFor = (studentId: string) => transactions.filter((t) => t.studentId === studentId).length
 
   return (
@@ -229,6 +246,7 @@ export default function Students() {
             <option value="all">Semua Status</option>
             <option value="aktif">Aktif</option>
             <option value="lulus">Alumni (Lulus)</option>
+            <option value="keluar">Keluar</option>
           </select>
           <select
             value={programFilter}
@@ -357,6 +375,18 @@ export default function Students() {
                           <GraduationCap size={16} />
                         </button>
                       )}
+                      {s.status === 'aktif' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setConfirmKeluar(s)
+                          }}
+                          className="h-9 w-9 flex items-center justify-center rounded-lg text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition"
+                          title="Tandai Keluar"
+                        >
+                          <LogOut size={16} />
+                        </button>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
@@ -456,6 +486,11 @@ export default function Students() {
               {editingId && form.status === 'lulus' && (
                 <p className="text-xs text-slate-400 -mt-2">
                   Siswa ini berstatus alumni. Gunakan aksi &quot;Luluskan Siswa&quot; untuk mengubah status kelulusan.
+                </p>
+              )}
+              {editingId && form.status === 'keluar' && (
+                <p className="text-xs text-slate-400 -mt-2">
+                  Siswa ini berstatus Keluar. Gunakan aksi &quot;Tandai Keluar&quot; dari tabel Data Siswa untuk mengubah status ini.
                 </p>
               )}
 
@@ -581,6 +616,42 @@ export default function Students() {
               >
                 {graduating && <Loader2 size={16} className="animate-spin" />}
                 Luluskan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmKeluar && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 p-4">
+          <div className="absolute inset-0" onClick={() => setConfirmKeluar(null)} />
+          <div className="relative w-full max-w-sm rounded-2xl bg-white shadow-2xl p-5">
+            <div className="h-11 w-11 rounded-full bg-rose-50 flex items-center justify-center mb-3">
+              <LogOut size={20} className="text-rose-600" />
+            </div>
+            <h2 className="font-semibold text-slate-800 mb-1">Tandai siswa sebagai Keluar?</h2>
+            <p className="text-sm text-slate-500 mb-1">
+              Status <strong>{confirmKeluar.name}</strong> akan diubah menjadi <strong>Keluar</strong>.
+            </p>
+            <p className="text-xs text-slate-400 mb-4">
+              Data dan tunggakan siswa ini tetap tersimpan dan bisa dilihat lewat filter status. Sisa tunggakan tetap
+              tercatat dan tetap bisa dilunasi lewat Transaksi Baru.
+            </p>
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => setConfirmKeluar(null)}
+                disabled={markingKeluar}
+                className="flex-1 rounded-lg border border-slate-200 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleMarkKeluar}
+                disabled={markingKeluar}
+                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-rose-600 hover:bg-rose-700 transition py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {markingKeluar && <Loader2 size={16} className="animate-spin" />}
+                Tandai Keluar
               </button>
             </div>
           </div>
