@@ -11,12 +11,16 @@ export function generateStudentId(db) {
 }
 
 export function generateTransactionId(db, date) {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  const prefix = `TRX-${y}${m}${d}-`
-  const { count } = db
-    .prepare('SELECT COUNT(*) AS count FROM transactions WHERE id LIKE ?')
-    .get(`${prefix}%`)
-  return `${prefix}${String(count + 1).padStart(4, '0')}`
+  var y = date.getFullYear()
+  var m = String(date.getMonth() + 1).padStart(2, '0')
+  var d = String(date.getDate()).padStart(2, '0')
+  var prefix = 'TRX-' + y + m + d + '-'
+  var rows = db
+    .prepare('SELECT id FROM transactions WHERE id LIKE ?')
+    .all(prefix + '%')
+  var max = rows.reduce(function (acc, row) {
+    var n = parseInt(row.id.replace(prefix, ''), 10)
+    return Number.isFinite(n) ? Math.max(acc, n) : acc
+  }, 0)
+  return prefix + String(max + 1).padStart(4, '0')
 }
