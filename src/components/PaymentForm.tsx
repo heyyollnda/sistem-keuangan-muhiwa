@@ -1,5 +1,5 @@
 import { AlertCircle, Banknote, CheckCircle2, ChevronDown, ChevronUp, History, Search } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { GRADES } from '../data/mockData'
 import { STAFF_NAME, useApp } from '../context/AppContext'
 import { useToast } from '../context/ToastContext'
@@ -7,7 +7,6 @@ import { ApiError } from '../lib/api'
 import {
   formatCurrency,
   gradeIndex,
-  getArrears,
   getArrearsBills,
   getCategoryStatus,
   getFeeCategories,
@@ -16,10 +15,133 @@ import {
   toDatetimeLocal,
 } from '../lib/finance'
 import { useClickOutside } from '../lib/useClickOutside'
-import type { ArrearsItem, Grade, PaymentItem, Student, Transaction } from '../types'
+import type { ArrearsItem, Grade, PaymentItem, SchoolMonth, Student, Transaction } from '../types'
 import Header from './Header'
 import Receipt from './Receipt'
 import { CategoryStatusBadge, StudentStatusBadge } from './StatusBadges'
+
+// Composite keys identify one checkable/payable line uniquely across both sections — current
+// items are scoped to the actively-selected grade (form state), arrears bills carry their own
+// grade explicitly since they can span several prior grades at once.
+function currentKey(categoryId: string, month?: SchoolMonth): string {
+  return `current:${categoryId}:${month ?? ''}`
+}
+function arrearsKey(grade: Grade, categoryId: string, month?: SchoolMonth): string {
+  return `arrears:${grade}:${categoryId}:${month ?? ''}`
+}
+
+interface PayableLine {
+  key: string
+  kind: 'current' | 'arrears'
+  grade: Grade
+  categoryId: string
+  categoryName: string
+  month?: SchoolMonth
+  max: number
+}
+
+interface AmountInputRowProps {
+  label: string
+  sublabel?: string
+  max: number
+  checked: boolean
+  amount: string
+  disabled?: boolean
+  variant?: 'default' | 'amber'
+  statusBadge?: ReactNode
+  onToggle: () => void
+  onAmountChange: (value: string) => void
+  onPayFull: () => void
+}
+
+/** One checkable line item with its own manual nominal input — shared by both the current-kelas
+ *  categories section and the arrears section, so "check it, then type or Bayar Penuh" works
+ *  identically everywhere in this form. */
+function AmountInputRow({
+  label,
+  sublabel,
+  max,
+  checked,
+  amount,
+  disabled,
+  variant = 'default',
+  statusBadge,
+  onToggle,
+  onAmountChange,
+  onPayFull,
+}: AmountInputRowProps) {
+  const entered = Number(amount) || 0
+  const overLimit = entered > max
+  const isAmber = variant === 'amber'
+
+  const containerClass = disabled
+    ? 'border-slate-100 bg-slate-50 opacity-60'
+    : checked
+      ? isAmber
+        ? 'border-amber-400 bg-white'
+        : 'border-emerald-500 bg-emerald-50'
+      : isAmber
+        ? 'border-amber-200 hover:border-amber-300 bg-white'
+        : 'border-slate-200 hover:border-slate-300'
+
+  return (
+    <div className={`rounded-lg border px-4 py-3 transition ${containerClass}`}>
+      <label className={`flex items-center gap-3 ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+        <input
+          type="checkbox"
+          disabled={disabled}
+          checked={checked}
+          onChange={onToggle}
+          className={isAmber ? 'h-4 w-4 rounded accent-amber-600' : 'h-4 w-4 rounded accent-emerald-600'}
+        />
+        <div className="flex-1 min-w-0">
+          <p className={isAmber ? 'text-sm font-medium text-amber-900' : 'text-sm font-medium text-slate-700'}>{label}</p>
+          {sublabel && <p className={isAmber ? 'text-xs text-amber-600' : 'text-xs text-slate-400'}>{sublabel}</p>}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {statusBadge}
+          {!disabled && (
+            <span className={isAmber ? 'text-sm font-semibold text-amber-900' : 'text-sm font-semibold text-slate-800'}>
+              {formatCurrency(max)}
+            </span>
+          )}
+        </div>
+      </label>
+
+      {checked && !disabled && (
+        <div className="mt-2.5 pl-7">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">Rp</span>
+              <input
+                type="number"
+                min={0}
+                value={amount}
+                onChange={(e) => onAmountChange(e.target.value)}
+                placeholder="0"
+                className={`w-full rounded-lg border py-2 pl-8 pr-3 text-sm outline-none focus:ring-2 ${
+                  overLimit
+                    ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
+                    : 'border-slate-200 focus:border-emerald-500 focus:ring-emerald-500/20'
+                }`}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={onPayFull}
+              className="shrink-0 text-xs font-medium text-emerald-700 hover:text-emerald-800 border border-emerald-200 hover:bg-emerald-50 rounded-lg px-2.5 py-2 transition"
+            >
+              Bayar Penuh
+            </button>
+          </div>
+          {overLimit && (
+            <p className="text-xs text-red-600 mt-1">Tidak boleh melebihi sisa tagihan ({formatCurrency(max)}).</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function PaymentForm() {
   const { students, transactions, feeConfig, updateStudentGrade, addTransaction } = useApp()
@@ -31,11 +153,12 @@ export default function PaymentForm() {
 
   const [grade, setGrade] = useState<Grade>('Kelas 10')
   const [dateTime, setDateTime] = useState(() => toDatetimeLocal(new Date()))
-  const [checkedCategories, setCheckedCategories] = useState<Set<string>>(new Set())
-  const [checkedMonths, setCheckedMonths] = useState<Set<string>>(new Set())
+  // One shared "checked" set + "amounts" map for every payable line across both sections
+  // (current-kelas categories and arrears bills) — see currentKey/arrearsKey above.
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [amounts, setAmounts] = useState<Record<string, string>>({})
   const [expandedMonthly, setExpandedMonthly] = useState<Set<string>>(new Set())
-  const [includeArrears, setIncludeArrears] = useState(true)
-  const [amountGiven, setAmountGiven] = useState<string>('')
+  const [expandedArrears, setExpandedArrears] = useState<Set<string>>(new Set())
   const [errors, setErrors] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [receiptTransaction, setReceiptTransaction] = useState<Transaction | null>(null)
@@ -81,12 +204,9 @@ export default function PaymentForm() {
     })
   }, [monthlyCategoryDefs, selectedStudent, grade, feeConfig, transactions])
 
-  // Summarized (for display) and flattened per-month (for allocation) views of the same arrears.
-  const arrearsRows = useMemo(() => {
-    if (!selectedStudent) return []
-    return getArrears(selectedStudent.id, grade, selectedStudent.programKeahlian, feeConfig, transactions)
-  }, [selectedStudent, grade, feeConfig, transactions])
-
+  // Flattened per-bill view of every unpaid item from grades before the selected one — one
+  // entry per specific unpaid month (bulanan) or per whole category (tahunan), which is
+  // exactly the granularity this form now needs for individually checkable rows.
   const arrearsBills = useMemo(() => {
     if (!selectedStudent) return []
     return getArrearsBills(selectedStudent.id, grade, selectedStudent.programKeahlian, feeConfig, transactions)
@@ -94,44 +214,104 @@ export default function PaymentForm() {
 
   const arrearsTotal = arrearsBills.reduce((s, b) => s + b.outstanding, 0)
 
-  const selectedAnnualTotal = annualCategoryRows
-    .filter((c) => checkedCategories.has(c.id))
-    .reduce((s, c) => s + c.remaining, 0)
+  // Grouped by grade+category purely for rendering — a 'tahunan' category's group always has
+  // exactly one bill (rendered as a plain row); a 'bulanan' category's group has one bill per
+  // unpaid month (rendered as an expandable section, mirroring monthlyCategoryRows above).
+  const arrearsGroups = useMemo(() => {
+    const map = new Map<string, { grade: Grade; categoryId: string; categoryName: string; bills: typeof arrearsBills }>()
+    for (const bill of arrearsBills) {
+      const key = `${bill.grade}::${bill.categoryId}`
+      const group = map.get(key)
+      if (group) group.bills.push(bill)
+      else map.set(key, { grade: bill.grade, categoryId: bill.categoryId, categoryName: bill.categoryName, bills: [bill] })
+    }
+    return [...map.values()]
+  }, [arrearsBills])
 
-  const selectedMonthlyTotal = monthlyCategoryRows.reduce((sum, row) => {
-    return (
-      sum +
-      row.bills.reduce((s, b) => {
-        if (b.coveredByRegistrasi || b.outstanding <= 0) return s
-        const key = `${row.category.id}::${b.month}`
-        return checkedMonths.has(key) ? s + b.outstanding : s
-      }, 0)
-    )
-  }, 0)
+  // Every line the staff COULD check right now, current-kelas and arrears alike — the single
+  // source of truth for totals, submit-time validation, and the payload built on submit.
+  const payableLines = useMemo<PayableLine[]>(() => {
+    const lines: PayableLine[] = []
 
-  const totalDue = selectedAnnualTotal + selectedMonthlyTotal + (includeArrears ? arrearsTotal : 0)
-  const given = Math.max(0, Number(amountGiven) || 0)
+    for (const c of annualCategoryRows) {
+      if (c.isPaid) continue
+      lines.push({ key: currentKey(c.id), kind: 'current', grade, categoryId: c.id, categoryName: c.name, max: c.remaining })
+    }
+
+    for (const row of monthlyCategoryRows) {
+      for (const b of row.bills) {
+        if (b.coveredByRegistrasi || b.outstanding <= 0) continue
+        lines.push({
+          key: currentKey(row.category.id, b.month),
+          kind: 'current',
+          grade,
+          categoryId: row.category.id,
+          categoryName: row.category.name,
+          month: b.month,
+          max: b.outstanding,
+        })
+      }
+    }
+
+    for (const bill of arrearsBills) {
+      lines.push({
+        key: arrearsKey(bill.grade, bill.categoryId, bill.month),
+        kind: 'arrears',
+        grade: bill.grade,
+        categoryId: bill.categoryId,
+        categoryName: bill.categoryName,
+        month: bill.month,
+        max: bill.outstanding,
+      })
+    }
+
+    return lines
+  }, [annualCategoryRows, monthlyCategoryRows, arrearsBills, grade])
+
+  const checkedLines = useMemo(() => payableLines.filter((l) => checked.has(l.key)), [payableLines, checked])
+
+  // "Total Tagihan" — sisa tagihan penuh dari kategori yang dicentang, tidak peduli berapa
+  // yang sudah diisi staf (unchanged in spirit from before this form used manual input).
+  const selectedAnnualDue = checkedLines.filter((l) => l.kind === 'current' && !l.month).reduce((s, l) => s + l.max, 0)
+  const selectedMonthlyDue = checkedLines.filter((l) => l.kind === 'current' && l.month).reduce((s, l) => s + l.max, 0)
+  const selectedArrearsDue = checkedLines.filter((l) => l.kind === 'arrears').reduce((s, l) => s + l.max, 0)
+  const totalDue = selectedAnnualDue + selectedMonthlyDue + selectedArrearsDue
+
+  // "Jumlah Dibayar" — now purely derived: the sum of whatever staff actually typed (or
+  // "Bayar Penuh"-filled) into each checked line's own input, not a separately-entered budget.
+  const given = checkedLines.reduce((s, l) => s + (Number(amounts[l.key]) || 0), 0)
+
   // A partial payment (cicilan) is valid — `given` can land anywhere relative to `totalDue`.
   // Only one of these is ever positive: genuine cash change back, or a remaining balance still owed.
   const change = Math.max(0, given - totalDue)
   const sisaTagihan = Math.max(0, totalDue - given)
 
-  const toggleCategory = (id: string) => {
-    setCheckedCategories((prev) => {
+  const toggleChecked = (key: string) => {
+    setChecked((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(key)) {
+        next.delete(key)
+        // Clear its amount too, so re-checking the same line later starts fresh instead of
+        // silently resurrecting a stale figure.
+        setAmounts((a) => {
+          if (!(key in a)) return a
+          const copy = { ...a }
+          delete copy[key]
+          return copy
+        })
+      } else {
+        next.add(key)
+      }
       return next
     })
   }
 
-  const toggleMonth = (key: string) => {
-    setCheckedMonths((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
+  const setAmount = (key: string, value: string) => {
+    setAmounts((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const payFull = (key: string, max: number) => {
+    setAmounts((prev) => ({ ...prev, [key]: String(max) }))
   }
 
   const toggleExpandedMonthly = (categoryId: string) => {
@@ -143,25 +323,33 @@ export default function PaymentForm() {
     })
   }
 
+  const toggleExpandedArrears = (groupKey: string) => {
+    setExpandedArrears((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupKey)) next.delete(groupKey)
+      else next.add(groupKey)
+      return next
+    })
+  }
+
   const selectStudent = (s: Student) => {
     setSelectedStudent(s)
     setSearch(`${s.name} — ${s.nisn}`)
     setShowResults(false)
     setGrade(s.grade)
-    setCheckedCategories(new Set())
-    setCheckedMonths(new Set())
+    setChecked(new Set())
+    setAmounts({})
   }
 
   const resetForm = () => {
     setSelectedStudent(null)
     setSearch('')
-    setCheckedCategories(new Set())
-    setCheckedMonths(new Set())
+    setChecked(new Set())
+    setAmounts({})
     setExpandedMonthly(new Set())
+    setExpandedArrears(new Set())
     setGrade('Kelas 10')
     setDateTime(toDatetimeLocal(new Date()))
-    setIncludeArrears(true)
-    setAmountGiven('')
     setErrors([])
   }
 
@@ -171,8 +359,16 @@ export default function PaymentForm() {
 
     if (!student) errs.push('Pilih siswa terlebih dahulu.')
     if (!dateTime) errs.push('Tanggal & waktu wajib diisi.')
-    if (totalDue <= 0) errs.push('Pilih minimal satu kategori atau bulan yang akan dibayar.')
-    if (given <= 0) errs.push('Jumlah dibayar wajib diisi.')
+
+    if (checked.size === 0) {
+      errs.push('Pilih minimal satu kategori atau bulan yang akan dibayar.')
+    } else {
+      const hasEmpty = checkedLines.some((l) => !(Number(amounts[l.key]) > 0))
+      if (hasEmpty) errs.push('Isi nominal untuk kategori yang dicentang, atau batalkan centangnya.')
+
+      const hasOverLimit = checkedLines.some((l) => (Number(amounts[l.key]) || 0) > l.max)
+      if (hasOverLimit) errs.push('Ada nominal yang melebihi sisa tagihan kategorinya. Periksa kembali sebelum menyimpan.')
+    }
 
     if (errs.length > 0) {
       setErrors(errs)
@@ -185,57 +381,30 @@ export default function PaymentForm() {
     }
     if (!student) return
 
-    // Allocate what was actually given across the requested items, in priority order —
-    // arrears first (oldest grade/month first), then current-kelas annual categories, then
-    // current-kelas monthly bills — rather than assuming `given` always covers everything.
-    // Whatever a bill doesn't receive here just stays outstanding and keeps showing up as
-    // "Dicicil"/"Belum Dibayar" in future transactions.
-    let budget = given
-
-    const arrearsItems: ArrearsItem[] = []
-    if (includeArrears) {
-      for (const bill of arrearsBills) {
-        if (budget <= 0) break
-        const alloc = Math.min(budget, bill.outstanding)
-        if (alloc > 0) {
-          arrearsItems.push({
-            grade: bill.grade,
-            categoryId: bill.categoryId,
-            categoryName: bill.month ? `${bill.categoryName} - ${bill.month}` : bill.categoryName,
-            amount: alloc,
-            month: bill.month,
-          })
-          budget -= alloc
-        }
-      }
-    }
-
     const currentItems: PaymentItem[] = []
-    for (const c of annualCategoryRows.filter((cat) => checkedCategories.has(cat.id))) {
-      if (budget <= 0) break
-      const alloc = Math.min(budget, c.remaining)
-      if (alloc > 0) {
-        currentItems.push({ categoryId: c.id, categoryName: c.name, amount: alloc })
-        budget -= alloc
-      }
-    }
+    const arrearsItems: ArrearsItem[] = []
 
-    for (const row of monthlyCategoryRows) {
-      for (const bill of row.bills) {
-        if (budget <= 0) break
-        if (bill.coveredByRegistrasi || bill.outstanding <= 0) continue
-        const key = `${row.category.id}::${bill.month}`
-        if (!checkedMonths.has(key)) continue
-        const alloc = Math.min(budget, bill.outstanding)
-        if (alloc > 0) {
-          currentItems.push({
-            categoryId: row.category.id,
-            categoryName: `${row.category.name} - ${bill.month}`,
-            amount: alloc,
-            month: bill.month,
-          })
-          budget -= alloc
-        }
+    for (const line of checkedLines) {
+      const amount = Number(amounts[line.key]) || 0
+      if (amount <= 0) continue // safety net — validation above should already prevent this
+
+      const categoryName = line.month ? `${line.categoryName} - ${line.month}` : line.categoryName
+
+      if (line.kind === 'current') {
+        currentItems.push({
+          categoryId: line.categoryId,
+          categoryName,
+          amount,
+          ...(line.month ? { month: line.month } : {}),
+        })
+      } else {
+        arrearsItems.push({
+          grade: line.grade,
+          categoryId: line.categoryId,
+          categoryName,
+          amount,
+          ...(line.month ? { month: line.month } : {}),
+        })
       }
     }
 
@@ -332,8 +501,8 @@ export default function PaymentForm() {
                     disabled={selectedStudent != null && selectedStudent.status !== 'aktif'}
                     onChange={(e) => {
                       setGrade(e.target.value as Grade)
-                      setCheckedCategories(new Set())
-                      setCheckedMonths(new Set())
+                      setChecked(new Set())
+                      setAmounts({})
                     }}
                     className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
@@ -366,7 +535,7 @@ export default function PaymentForm() {
               <h2 className="font-semibold text-slate-800 mb-1">Kategori Pembayaran — {grade}</h2>
               <p className="text-xs text-slate-400 mb-4">
                 {selectedStudent
-                  ? 'Pilih kategori yang dibayarkan pada transaksi ini.'
+                  ? 'Centang kategori yang dibayar, lalu isi nominalnya masing-masing.'
                   : 'Pilih siswa terlebih dahulu untuk menampilkan kategori pembayaran.'}
               </p>
 
@@ -379,38 +548,24 @@ export default function PaymentForm() {
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {annualCategoryRows.map((c) => (
-                    <label
-                      key={c.id}
-                      className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition ${
-                        c.isPaid
-                          ? 'border-slate-100 bg-slate-50 opacity-60 cursor-not-allowed'
-                          : checkedCategories.has(c.id)
-                            ? 'border-emerald-500 bg-emerald-50 cursor-pointer'
-                            : 'border-slate-200 hover:border-slate-300 cursor-pointer'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
+                  {annualCategoryRows.map((c) => {
+                    const key = currentKey(c.id)
+                    return (
+                      <AmountInputRow
+                        key={c.id}
+                        label={c.name}
+                        sublabel={c.paid > 0 && !c.isPaid ? `Sudah dibayar ${formatCurrency(c.paid)}, sisa berikut` : undefined}
+                        max={c.remaining}
+                        checked={checked.has(key)}
+                        amount={amounts[key] ?? ''}
                         disabled={c.isPaid}
-                        checked={checkedCategories.has(c.id)}
-                        onChange={() => toggleCategory(c.id)}
-                        className="h-4 w-4 rounded accent-emerald-600"
+                        statusBadge={<CategoryStatusBadge status={getCategoryStatus(c.due, c.paid)} />}
+                        onToggle={() => toggleChecked(key)}
+                        onAmountChange={(v) => setAmount(key, v)}
+                        onPayFull={() => payFull(key, c.remaining)}
                       />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-700">{c.name}</p>
-                        {c.paid > 0 && !c.isPaid && (
-                          <p className="text-xs text-amber-600">Sudah dibayar {formatCurrency(c.paid)}, sisa berikut</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <CategoryStatusBadge status={getCategoryStatus(c.due, c.paid)} />
-                        {!c.isPaid && (
-                          <span className="text-sm font-semibold text-slate-800">{formatCurrency(c.remaining)}</span>
-                        )}
-                      </div>
-                    </label>
-                  ))}
+                    )
+                  })}
 
                   {monthlyCategoryRows.map((row) => {
                     const isExpanded = expandedMonthly.has(row.category.id)
@@ -442,37 +597,24 @@ export default function PaymentForm() {
                           </div>
                         </button>
                         {isExpanded && (
-                          <div className="border-t border-slate-100 divide-y divide-slate-100">
+                          <div className="border-t border-slate-100 p-3 space-y-2">
                             {row.bills.map((bill) => {
-                              const key = `${row.category.id}::${bill.month}`
+                              const key = currentKey(row.category.id, bill.month)
                               const disabled = bill.status === 'lunas'
                               return (
-                                <label
+                                <AmountInputRow
                                   key={bill.month}
-                                  className={`flex items-center gap-3 px-4 py-2.5 ${
-                                    disabled ? 'bg-slate-50 opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-slate-50'
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    disabled={disabled}
-                                    checked={checkedMonths.has(key)}
-                                    onChange={() => toggleMonth(key)}
-                                    className="h-4 w-4 rounded accent-emerald-600"
-                                  />
-                                  <span className="flex-1 text-sm text-slate-700">{bill.month}</span>
-                                  {bill.coveredByRegistrasi && (
-                                    <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shrink-0">
-                                      Termasuk dalam HER Registrasi PPDB
-                                    </span>
-                                  )}
-                                  <CategoryStatusBadge status={bill.status} />
-                                  {!disabled && (
-                                    <span className="text-sm font-semibold text-slate-800 w-28 text-right shrink-0">
-                                      {formatCurrency(bill.outstanding)}
-                                    </span>
-                                  )}
-                                </label>
+                                  label={bill.month}
+                                  sublabel={bill.coveredByRegistrasi ? 'Termasuk dalam HER Registrasi PPDB' : undefined}
+                                  max={bill.outstanding}
+                                  checked={checked.has(key)}
+                                  amount={amounts[key] ?? ''}
+                                  disabled={disabled}
+                                  statusBadge={<CategoryStatusBadge status={bill.status} />}
+                                  onToggle={() => toggleChecked(key)}
+                                  onAmountChange={(v) => setAmount(key, v)}
+                                  onPayFull={() => payFull(key, bill.outstanding)}
+                                />
                               )
                             })}
                           </div>
@@ -483,41 +625,86 @@ export default function PaymentForm() {
                 </div>
               )}
 
-              {arrearsRows.length > 0 && (
+              {arrearsGroups.length > 0 && (
                 <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <label className="flex items-center gap-2 mb-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={includeArrears}
-                      onChange={(e) => setIncludeArrears(e.target.checked)}
-                      className="h-4 w-4 rounded accent-amber-600"
-                    />
-                    <span className="flex items-center gap-1.5 text-sm font-semibold text-amber-800">
-                      <History size={15} /> Arrears / Tunggakan Kelas Sebelumnya
-                    </span>
-                  </label>
-                  <div className="space-y-1.5 pl-6">
-                    {arrearsRows.map((r, i) => (
-                      <div key={i} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="text-amber-800 min-w-0 truncate">
-                          {r.categoryName} <span className="text-amber-500">({r.grade})</span>
-                        </span>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {r.monthsUnpaid !== undefined ? (
-                            <span className="text-xs font-medium text-amber-700">
-                              {r.monthsUnpaid} bulan belum dibayar
-                            </span>
-                          ) : (
-                            <CategoryStatusBadge status={getCategoryStatus(r.due, r.paid)} />
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <History size={15} className="text-amber-700" />
+                    <span className="text-sm font-semibold text-amber-800">Arrears / Tunggakan Kelas Sebelumnya</span>
+                  </div>
+                  <div className="space-y-2">
+                    {arrearsGroups.map((group) => {
+                      const isMonthly = group.bills.some((b) => b.month)
+
+                      if (!isMonthly) {
+                        const bill = group.bills[0]
+                        const key = arrearsKey(bill.grade, bill.categoryId, bill.month)
+                        return (
+                          <AmountInputRow
+                            key={key}
+                            label={`${bill.categoryName} (${bill.grade})`}
+                            max={bill.outstanding}
+                            checked={checked.has(key)}
+                            amount={amounts[key] ?? ''}
+                            variant="amber"
+                            onToggle={() => toggleChecked(key)}
+                            onAmountChange={(v) => setAmount(key, v)}
+                            onPayFull={() => payFull(key, bill.outstanding)}
+                          />
+                        )
+                      }
+
+                      const groupKey = `${group.grade}::${group.categoryId}`
+                      const isExpanded = expandedArrears.has(groupKey)
+                      const totalOutstanding = group.bills.reduce((s, b) => s + b.outstanding, 0)
+                      return (
+                        <div key={groupKey} className="rounded-lg border border-amber-200 overflow-hidden bg-white">
+                          <button
+                            type="button"
+                            onClick={() => toggleExpandedArrears(groupKey)}
+                            className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-amber-50 transition"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-amber-900">
+                                {group.categoryName} <span className="text-amber-500">({group.grade})</span>
+                              </p>
+                              <p className="text-xs text-amber-600">{group.bills.length} bulan belum dibayar</p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-sm font-semibold text-amber-900">{formatCurrency(totalOutstanding)}</span>
+                              {isExpanded ? (
+                                <ChevronUp size={16} className="text-amber-500" />
+                              ) : (
+                                <ChevronDown size={16} className="text-amber-500" />
+                              )}
+                            </div>
+                          </button>
+                          {isExpanded && (
+                            <div className="border-t border-amber-100 p-3 space-y-2">
+                              {group.bills.map((bill) => {
+                                const key = arrearsKey(bill.grade, bill.categoryId, bill.month)
+                                return (
+                                  <AmountInputRow
+                                    key={key}
+                                    label={bill.month ?? ''}
+                                    max={bill.outstanding}
+                                    checked={checked.has(key)}
+                                    amount={amounts[key] ?? ''}
+                                    variant="amber"
+                                    onToggle={() => toggleChecked(key)}
+                                    onAmountChange={(v) => setAmount(key, v)}
+                                    onPayFull={() => payFull(key, bill.outstanding)}
+                                  />
+                                )
+                              })}
+                            </div>
                           )}
-                          <span className="font-medium text-amber-800">{formatCurrency(r.outstanding)}</span>
                         </div>
-                      </div>
-                    ))}
-                    <div className="flex items-center justify-between text-sm font-semibold border-t border-amber-200 pt-1.5 mt-1.5">
-                      <span className="text-amber-900">Total Tunggakan</span>
-                      <span className="text-amber-900">{formatCurrency(arrearsTotal)}</span>
-                    </div>
+                      )
+                    })}
+                  </div>
+                  <div className="flex items-center justify-between text-sm font-semibold border-t border-amber-200 pt-2 mt-2">
+                    <span className="text-amber-900">Total Tunggakan</span>
+                    <span className="text-amber-900">{formatCurrency(arrearsTotal)}</span>
                   </div>
                 </div>
               )}
@@ -531,22 +718,22 @@ export default function PaymentForm() {
               </h2>
 
               <div className="space-y-1.5 text-sm">
-                {selectedAnnualTotal > 0 && (
+                {selectedAnnualDue > 0 && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Kategori Tahunan</span>
-                    <span className="font-medium text-slate-700">{formatCurrency(selectedAnnualTotal)}</span>
+                    <span className="font-medium text-slate-700">{formatCurrency(selectedAnnualDue)}</span>
                   </div>
                 )}
-                {selectedMonthlyTotal > 0 && (
+                {selectedMonthlyDue > 0 && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Kategori Bulanan</span>
-                    <span className="font-medium text-slate-700">{formatCurrency(selectedMonthlyTotal)}</span>
+                    <span className="font-medium text-slate-700">{formatCurrency(selectedMonthlyDue)}</span>
                   </div>
                 )}
-                {includeArrears && arrearsTotal > 0 && (
+                {selectedArrearsDue > 0 && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Tunggakan</span>
-                    <span className="font-medium text-amber-600">{formatCurrency(arrearsTotal)}</span>
+                    <span className="font-medium text-amber-600">{formatCurrency(selectedArrearsDue)}</span>
                   </div>
                 )}
                 <div className="flex justify-between pt-2 border-t border-slate-100 text-base font-bold">
@@ -557,17 +744,10 @@ export default function PaymentForm() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Jumlah Dibayar</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">Rp</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={amountGiven}
-                    onChange={(e) => setAmountGiven(e.target.value)}
-                    placeholder="0"
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm font-medium outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                  />
+                <div className="w-full rounded-lg border border-slate-200 bg-slate-100 py-2.5 px-3 text-sm font-semibold text-slate-700">
+                  {formatCurrency(given)}
                 </div>
+                <p className="text-[11px] text-slate-400 mt-1">Dihitung otomatis dari nominal yang diisi per kategori di atas.</p>
               </div>
 
               {sisaTagihan > 0 ? (
