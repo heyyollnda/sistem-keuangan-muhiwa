@@ -91,10 +91,13 @@ export function getPaidForCategory(
   let sum = 0
   for (const t of transactions) {
     if (t.studentId !== studentId) continue
-    if (t.grade === grade) {
-      for (const item of t.currentItems) {
-        if (item.categoryId === categoryId && item.month === month) sum += item.amount
-      }
+    // Each currentItem carries its own grade (the Kelas actively selected in the form when
+    // it was paid — can differ from the transaction's own t.grade, e.g. paying a prior
+    // grade's own current-kelas category). Falls back to t.grade for older cached data from
+    // before that was tracked per-item.
+    for (const item of t.currentItems) {
+      const itemGrade = item.grade ?? t.grade
+      if (itemGrade === grade && item.categoryId === categoryId && item.month === month) sum += item.amount
     }
     for (const item of t.arrearsItems) {
       if (item.grade === grade && item.categoryId === categoryId && item.month === month) sum += item.amount
@@ -314,11 +317,12 @@ export function getCategoryLedger(
   const entries: LedgerEntry[] = []
   for (const t of transactions) {
     if (t.studentId !== studentId) continue
-    if (t.grade === grade) {
-      for (const item of t.currentItems) {
-        if (item.categoryId === categoryId) {
-          entries.push({ transactionId: t.id, date: t.date, amount: item.amount, month: item.month })
-        }
+    // See getPaidForCategory above — each currentItem carries its own grade now, falling
+    // back to t.grade for older cached data.
+    for (const item of t.currentItems) {
+      const itemGrade = item.grade ?? t.grade
+      if (itemGrade === grade && item.categoryId === categoryId) {
+        entries.push({ transactionId: t.id, date: t.date, amount: item.amount, month: item.month })
       }
     }
     for (const item of t.arrearsItems) {

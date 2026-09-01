@@ -246,6 +246,7 @@ export default function PaymentForm() {
       const created = await addTransaction({
         studentId: student.id,
         date: txDate.toISOString(),
+        grade,
         currentItems,
         arrearsItems,
         amountGiven: given,

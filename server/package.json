@@ -11,6 +11,7 @@
     "seed": "node db/seed.js",
     "reset-data": "node db/reset-dummy-data.js",
     "migrate-program-keahlian": "node db/migrate-rename-program-keahlian.js",
+    "fix-misfiled-current-items": "node db/fix-misfiled-current-items.js",
     "migrate-status-keluar": "node db/migrate-add-status-keluar.js"
   },
   "dependencies": {

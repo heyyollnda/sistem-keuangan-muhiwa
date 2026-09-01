@@ -53,6 +53,11 @@ export interface PaymentItem {
   categoryId: string
   categoryName: string
   amount: number
+  /** The Kelas this item was actually filed under — can differ from the transaction's own
+   *  grade (e.g. staff picks a prior grade to pay that grade's own current-kelas category).
+   *  Optional only for backward compatibility with data fetched before this was tracked
+   *  per-item; callers should fall back to the transaction's own grade when absent. */
+  grade?: Grade
   /** Set only when this item pays a specific month of a "bulanan" category. */
   month?: SchoolMonth
 }

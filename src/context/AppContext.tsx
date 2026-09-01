@@ -57,6 +57,11 @@ const AppContext = createContext<AppContextValue | null>(null)
 export interface NewTransactionInput {
   studentId: string
   date: string
+  // The grade actively selected in the New Transaction form's Kelas dropdown — can differ
+  // from the student's own stored grade (e.g. staff picks a prior grade to pay that grade's
+  // own current-kelas category). The backend uses this for currentItems' grade column
+  // instead of assuming it always matches the student record.
+  grade: Grade
   currentItems: PaymentItem[]
   arrearsItems: ArrearsItem[]
   amountGiven: number

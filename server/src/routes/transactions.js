@@ -11,8 +11,11 @@ function itemToApi(row) {
     categoryId: row.category_id,
     categoryName: row.category_name,
     amount: row.amount,
+    // transaction_items.grade is NOT NULL for every row regardless of item_type — current
+    // items now carry their own actively-selected grade too (see POST/PUT above), not just
+    // arrears, so this is always included rather than gated behind item_type.
+    grade: row.grade,
     ...(row.month ? { month: row.month } : {}),
-    ...(row.item_type === 'arrears' ? { grade: row.grade } : {}),
   }
 }
 
@@ -57,12 +60,15 @@ function validateItem(item, { requireGrade }) {
 
 function validateBody(body) {
   const errors = []
-  const { studentId, date, currentItems, arrearsItems, amountGiven, staffName } = body
+  const { studentId, date, currentItems, arrearsItems, amountGiven, staffName, grade } = body
 
   if (typeof studentId !== 'string' || !studentId.trim()) errors.push('studentId is required')
   if (typeof date !== 'string' || Number.isNaN(new Date(date).getTime())) errors.push('date must be a valid ISO date string')
   if (typeof staffName !== 'string' || !staffName.trim()) errors.push('staffName is required')
   if (typeof amountGiven !== 'number' || amountGiven < 0) errors.push('amountGiven must be a non-negative number')
+  // Optional (falls back to student.grade below) so an older cached client that doesn't send
+  // it yet still works — but if it IS sent, it must be a real grade.
+  if (grade !== undefined && !GRADES.includes(grade)) errors.push(`grade must be one of: ${GRADES.join(', ')}`)
 
   const current = currentItems ?? []
   const arrears = arrearsItems ?? []
@@ -133,10 +139,16 @@ router.post(
   '/',
   asyncRoute(async (req, res) => {
     validateBody(req.body)
-    const { studentId, date, currentItems = [], arrearsItems = [], amountGiven, staffName } = req.body
+    const { studentId, date, currentItems = [], arrearsItems = [], amountGiven, staffName, grade } = req.body
 
     const student = db.prepare('SELECT * FROM students WHERE id = ?').get(studentId)
     if (!student) throw new ApiError(404, `Student ${studentId} not found`)
+
+    // The grade actively selected in the form when currentItems were computed — not
+    // necessarily student.grade, e.g. staff picks a PRIOR grade to pay that grade's own
+    // current-kelas annual category (HER Registrasi PPDB, etc). Falls back to student.grade
+    // for an older client that doesn't send it yet.
+    const currentItemGrade = grade ?? student.grade
 
     const totalPaid = [...currentItems, ...arrearsItems].reduce((s, i) => s + i.amount, 0)
     if (amountGiven < totalPaid) {
@@ -172,7 +184,7 @@ router.post(
         staffName.trim()
       )
       for (const item of currentItems) {
-        insertItem.run(id, 'current', student.grade, item.categoryId, item.categoryName, Math.round(item.amount), item.month ?? null)
+        insertItem.run(id, 'current', currentItemGrade, item.categoryId, item.categoryName, Math.round(item.amount), item.month ?? null)
       }
       for (const item of arrearsItems) {
         insertItem.run(id, 'arrears', item.grade, item.categoryId, item.categoryName, Math.round(item.amount), item.month ?? null)
@@ -189,10 +201,13 @@ router.post(
 // validates a narrower shape than POST's validateBody.
 function validateUpdateBody(body) {
   const errors = []
-  const { date, currentItems, arrearsItems, amountGiven } = body
+  const { date, currentItems, arrearsItems, amountGiven, grade } = body
 
   if (typeof date !== 'string' || Number.isNaN(new Date(date).getTime())) errors.push('date must be a valid ISO date string')
   if (typeof amountGiven !== 'number' || amountGiven < 0) errors.push('amountGiven must be a non-negative number')
+  // Optional (falls back to existing.grade below) — no current frontend caller sends this yet
+  // (Reports.tsx's edit modal has no grade selector), but if it IS sent, it must be valid.
+  if (grade !== undefined && !GRADES.includes(grade)) errors.push(`grade must be one of: ${GRADES.join(', ')}`)
 
   const current = currentItems ?? []
   const arrears = arrearsItems ?? []
@@ -217,7 +232,8 @@ router.put(
     if (!existing) throw new ApiError(404, `Transaction ${req.params.id} not found`)
 
     validateUpdateBody(req.body)
-    const { date, currentItems = [], arrearsItems = [], amountGiven } = req.body
+    const { date, currentItems = [], arrearsItems = [], amountGiven, grade } = req.body
+    const currentItemGrade = grade ?? existing.grade
 
     const totalPaid = [...currentItems, ...arrearsItems].reduce((s, i) => s + i.amount, 0)
     if (amountGiven < totalPaid) {
@@ -237,10 +253,11 @@ router.put(
     const run = db.transaction(() => {
       updateTx.run(date, totalPaid, amountGiven, changeAmount, req.params.id)
       deleteItems.run(req.params.id)
-      // Current items keep the transaction's own (fixed) grade; arrears items carry their own,
-      // same as POST above.
+      // currentItemGrade: the actively-selected grade when items were computed, same as POST
+      // above — falls back to existing.grade (the transaction's own fixed grade) when not
+      // sent. Arrears items carry their own grade regardless.
       for (const item of currentItems) {
-        insertItem.run(req.params.id, 'current', existing.grade, item.categoryId, item.categoryName, Math.round(item.amount), item.month ?? null)
+        insertItem.run(req.params.id, 'current', currentItemGrade, item.categoryId, item.categoryName, Math.round(item.amount), item.month ?? null)
       }
       for (const item of arrearsItems) {
         insertItem.run(req.params.id, 'arrears', item.grade, item.categoryId, item.categoryName, Math.round(item.amount), item.month ?? null)
