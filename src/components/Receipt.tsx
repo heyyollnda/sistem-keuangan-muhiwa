@@ -2,7 +2,7 @@ import { CheckCircle2, Download, Loader2, Mail, MessageCircle, X } from 'lucide-
 import { useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useToast } from '../context/ToastContext'
-import { formatCurrency, formatDateTime, getRemainingForItem } from '../lib/finance'
+import { formatCurrency, formatDateTime, getRemainingForItem, resolveTahunAjaran } from '../lib/finance'
 import { buildEmailLink, buildReceiptMessage, buildWhatsAppLink, downloadReceiptPdf } from '../lib/receiptExport'
 import type { Transaction } from '../types'
 import SchoolLogo from './SchoolLogo'
@@ -24,22 +24,43 @@ export default function Receipt({ transaction: t, onClose }: Props) {
 
   // Per-item balance still owed *after* this transaction — lets a partial-payment receipt
   // show exactly what's left, month-aware for monthly categories, not just what was paid today.
+  // Each side resolves its own tahun ajaran from the student's entryYear (falls back to 0 when
+  // the student record can't be found, e.g. deleted since this transaction was made — there's
+  // no entryYear to resolve against, so "sisa" simply can't be shown, not a crash).
+  const currentTahunAjaran = student ? resolveTahunAjaran(student.entryYear, t.grade) : null
   const currentItemsWithRemaining = t.currentItems.map((item) => ({
     ...item,
-    remaining: getRemainingForItem(t.studentId, t.grade, item.categoryId, item.month, t.programKeahlian, feeConfig, transactions),
+    remaining: currentTahunAjaran
+      ? getRemainingForItem(
+          t.studentId,
+          t.grade,
+          item.categoryId,
+          item.month,
+          t.programKeahlian,
+          currentTahunAjaran,
+          feeConfig,
+          transactions
+        )
+      : 0,
   }))
-  const arrearsItemsWithRemaining = t.arrearsItems.map((item) => ({
-    ...item,
-    remaining: getRemainingForItem(
-      t.studentId,
-      item.grade,
-      item.categoryId,
-      item.month,
-      t.programKeahlian,
-      feeConfig,
-      transactions
-    ),
-  }))
+  const arrearsItemsWithRemaining = t.arrearsItems.map((item) => {
+    const arrearsTahunAjaran = student ? resolveTahunAjaran(student.entryYear, item.grade) : null
+    return {
+      ...item,
+      remaining: arrearsTahunAjaran
+        ? getRemainingForItem(
+            t.studentId,
+            item.grade,
+            item.categoryId,
+            item.month,
+            t.programKeahlian,
+            arrearsTahunAjaran,
+            feeConfig,
+            transactions
+          )
+        : 0,
+    }
+  })
   const totalRemainingThisTx =
     currentItemsWithRemaining.reduce((s, i) => s + i.remaining, 0) +
     arrearsItemsWithRemaining.reduce((s, i) => s + i.remaining, 0)

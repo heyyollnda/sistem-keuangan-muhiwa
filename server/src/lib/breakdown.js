@@ -79,16 +79,29 @@ export function loadPeriodPaidMap(db, studentIds, dateFrom, dateTo) {
   return map
 }
 
-/** Map<`${grade}::${programKeahlian}`, categoryRow[]> — every active fee category, grouped. */
+/** Map<`${grade}::${programKeahlian}::${tahunAjaran}`, categoryRow[]> — every active fee
+ *  category, grouped. Fees go up every year, so the same grade+program can have several
+ *  tahun_ajaran "generations" of categories at once — computeBreakdown below resolves which
+ *  one applies to a given student via resolveTahunAjaran(student.entry_year, grade), never
+ *  just "whichever's here" for that grade+program. */
 export function loadActiveFeeCategoriesByClass(db) {
   const map = new Map()
   for (const row of db.prepare('SELECT * FROM fee_categories WHERE active = 1').all()) {
-    const key = `${row.grade}::${row.program_keahlian}`
+    const key = `${row.grade}::${row.program_keahlian}::${row.tahun_ajaran}`
     const list = map.get(key)
     if (list) list.push(row)
     else map.set(key, [row])
   }
   return map
+}
+
+/** The tahun ajaran ("2026/2027") that applies to a student at a given grade, derived from
+ *  when they first entered Kelas 10 — Kelas 11 is entry_year+1, Kelas 12 is entry_year+2.
+ *  Mirrors src/lib/finance.ts's resolveTahunAjaran exactly; keep both in lockstep. */
+export function resolveTahunAjaran(entryYear, grade) {
+  const offset = GRADES.indexOf(grade)
+  const year = entryYear + offset
+  return `${year}/${year + 1}`
 }
 
 function getCategoryStatus(due, paid) {
@@ -132,7 +145,8 @@ export function computeBreakdown(student, feeCategoriesByClass, paidMap) {
   const rows = []
   for (let i = 0; i <= idx; i++) {
     const grade = GRADES[i]
-    const categories = feeCategoriesByClass.get(`${grade}::${student.program_keahlian}`) ?? []
+    const tahunAjaran = resolveTahunAjaran(student.entry_year, grade)
+    const categories = feeCategoriesByClass.get(`${grade}::${student.program_keahlian}::${tahunAjaran}`) ?? []
     const julyCovered = isRegistrasiFullyPaid(paidMap, student.id, grade, categories)
 
     for (const cat of categories) {
@@ -175,4 +189,22 @@ export function computeBreakdown(student, feeCategoriesByClass, paidMap) {
 /** Mirrors finance.ts's getTotalOutstandingForStudent — just the summed outstanding figure. */
 export function computeTotalOutstanding(student, feeCategoriesByClass, paidMap) {
   return computeBreakdown(student, feeCategoriesByClass, paidMap).reduce((s, r) => s + r.outstanding, 0)
+}
+
+/** Grades (up to the student's current grade) with NO active fee_categories configured for the
+ *  tahun ajaran resolveTahunAjaran(student.entry_year, grade) resolves to. A grade missing here
+ *  just silently contributes zero rows to computeBreakdown — indistinguishable from "this grade
+ *  genuinely has zero categories on purpose" unless a caller checks explicitly, which is what
+ *  this is for (PaymentForm's "Nominal belum dikonfigurasi..." notice, breakdown views). */
+export function findUnconfiguredGrades(student, feeCategoriesByClass) {
+  const idx = GRADES.indexOf(student.grade)
+  const missing = []
+  for (let i = 0; i <= idx; i++) {
+    const grade = GRADES[i]
+    const tahunAjaran = resolveTahunAjaran(student.entry_year, grade)
+    if (!feeCategoriesByClass.has(`${grade}::${student.program_keahlian}::${tahunAjaran}`)) {
+      missing.push({ grade, tahunAjaran })
+    }
+  }
+  return missing
 }

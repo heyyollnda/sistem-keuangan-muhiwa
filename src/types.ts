@@ -34,8 +34,8 @@ export interface FeeCategory {
   note?: string
 }
 
-/** Keyed by `classKey(grade, programKeahlian)` — each Kelas + Program Keahlian combination
- *  owns its own independent list of categories and amounts. */
+/** Keyed by `classKey(grade, programKeahlian, tahunAjaran)` — each Kelas + Program Keahlian +
+ *  Tahun Ajaran combination owns its own independent list of categories and amounts. */
 export type FeeConfig = Record<string, FeeCategory[]>
 
 export interface Student {
@@ -44,6 +44,11 @@ export interface Student {
   nisn: string
   grade: Grade
   programKeahlian: ProgramKeahlian
+  /** Tahun ajaran (starting year, e.g. 2026 for "2026/2027") this student first entered Kelas
+   *  10 — the anchor resolveTahunAjaran() uses to work out which year's fee_categories apply
+   *  to them at any grade. Assumed correct on a straight, no-repeated-grade path; correctable
+   *  by hand via Edit Siswa for a student who ever tinggal kelas. */
+  entryYear: number
   phone: string
   email: string
   status: StudentStatus
@@ -129,6 +134,10 @@ export interface ArrearsSummaryRow {
   outstanding: number
   paidCategories: string[]
   paymentStatus: 'lunas' | 'dicicil' | 'belum'
+  /** Grades (up to the student's current one) with no fee_categories configured for the tahun
+   *  ajaran resolveTahunAjaran(student.entryYear, grade) resolves to — empty when everything's
+   *  configured. */
+  unconfiguredGrades: { grade: Grade; tahunAjaran: string }[]
 }
 
 /** One row of GET /api/reports/class-summary — a student's per-category breakdown scoped to
@@ -141,6 +150,8 @@ export interface ClassSummaryRow {
   semesterDibayar: number
   sisa: number
   status: 'lunas' | 'dicicil' | 'belum'
+  /** See ArrearsSummaryRow.unconfiguredGrades. */
+  unconfiguredGrades: { grade: Grade; tahunAjaran: string }[]
 }
 
 /** GET /api/dashboard/summary — every figure the Dashboard's stat cards need. */

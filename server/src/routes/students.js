@@ -13,10 +13,23 @@ function toApi(row) {
     nisn: row.nisn,
     grade: row.grade,
     programKeahlian: row.program_keahlian,
+    entryYear: row.entry_year,
     phone: row.phone,
     email: row.email,
     status: row.status,
   }
+}
+
+// The tahun ajaran (school year) a student assumed to be on a straight, no-repeated-grade path
+// would have first entered Kelas 10 in, computed from their CURRENT grade and today's date —
+// same formula migrate-add-tahun-ajaran.js used to backfill entry_year for existing students.
+// Used as the default for a newly-added student when entryYear isn't explicitly given; staff
+// correct it by hand via Edit Siswa for anyone who ever tinggal kelas.
+function computeDefaultEntryYear(grade, now = new Date()) {
+  const month = now.getMonth() + 1 // 1-12
+  const currentTahunAjaranYear = month >= 7 ? now.getFullYear() : now.getFullYear() - 1
+  const offset = GRADES.indexOf(grade)
+  return currentTahunAjaranYear - offset
 }
 
 // Returns validation errors instead of throwing — POST /:id and PUT /:id want a single
@@ -24,7 +37,7 @@ function toApi(row) {
 // its own and skip only the bad ones, so it calls this directly.
 function collectValidationErrors(body, { partial = false } = {}) {
   const errors = []
-  const { name, nisn, grade, programKeahlian, phone, email, status } = body
+  const { name, nisn, grade, programKeahlian, entryYear, phone, email, status } = body
 
   if (!partial || name !== undefined) {
     if (typeof name !== 'string' || !name.trim()) errors.push('name is required')
@@ -39,6 +52,12 @@ function collectValidationErrors(body, { partial = false } = {}) {
     if (!PROGRAM_KEAHLIAN_OPTIONS.includes(programKeahlian)) {
       errors.push(`programKeahlian must be one of: ${PROGRAM_KEAHLIAN_OPTIONS.join(', ')}`)
     }
+  }
+  // entryYear is always optional at the validation level — POST/import auto-compute it when
+  // absent (see computeDefaultEntryYear), it's only ever REQUIRED by the frontend's Edit Siswa
+  // form itself (always resubmits the student's current value, editable).
+  if (entryYear !== undefined && (typeof entryYear !== 'number' || !Number.isInteger(entryYear) || entryYear < 2000)) {
+    errors.push('entryYear must be a whole number year (e.g. 2026)')
   }
   if (status !== undefined && !STUDENT_STATUSES.includes(status)) {
     errors.push(`status must be one of: ${STUDENT_STATUSES.join(', ')}`)
@@ -98,14 +117,15 @@ router.post(
   '/',
   asyncRoute(async (req, res) => {
     validateBody(req.body)
-    const { name, nisn, grade, programKeahlian, phone = '', email = '', status = 'aktif' } = req.body
+    const { name, nisn, grade, programKeahlian, entryYear, phone = '', email = '', status = 'aktif' } = req.body
+    const resolvedEntryYear = entryYear ?? computeDefaultEntryYear(grade)
 
     const id = generateStudentId(db)
     try {
       db.prepare(
-        `INSERT INTO students (id, name, nisn, grade, program_keahlian, phone, email, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(id, name.trim(), nisn.trim(), grade, programKeahlian, phone, email, status)
+        `INSERT INTO students (id, name, nisn, grade, program_keahlian, entry_year, phone, email, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(id, name.trim(), nisn.trim(), grade, programKeahlian, resolvedEntryYear, phone, email, status)
     } catch (err) {
       if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
         throw new ApiError(409, `NISN ${nisn} is already registered to another student`)
@@ -132,8 +152,8 @@ router.post(
     }
 
     const insertStmt = db.prepare(
-      `INSERT INTO students (id, name, nisn, grade, program_keahlian, phone, email, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'aktif')`
+      `INSERT INTO students (id, name, nisn, grade, program_keahlian, entry_year, phone, email, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aktif')`
     )
     const nisnExistsStmt = db.prepare('SELECT 1 FROM students WHERE nisn = ?')
     const selectStmt = db.prepare('SELECT * FROM students WHERE id = ?')
@@ -178,6 +198,7 @@ router.post(
           nisn,
           item.grade,
           item.programKeahlian,
+          computeDefaultEntryYear(item.grade),
           typeof item.phone === 'string' ? item.phone : '',
           typeof item.email === 'string' ? item.email : ''
         )
@@ -202,18 +223,22 @@ router.put(
       nisn,
       grade,
       programKeahlian,
+      entryYear,
       phone = '',
       email = '',
       status = 'aktif',
     } = req.body
+    // Preserves the existing value if the caller doesn't send one (older client), but the
+    // frontend's Edit Siswa form always resends the student's current entryYear (editable).
+    const resolvedEntryYear = entryYear ?? existing.entry_year
 
     try {
       db.prepare(
         `UPDATE students
-         SET name = ?, nisn = ?, grade = ?, program_keahlian = ?, phone = ?, email = ?, status = ?,
+         SET name = ?, nisn = ?, grade = ?, program_keahlian = ?, entry_year = ?, phone = ?, email = ?, status = ?,
              updated_at = datetime('now')
          WHERE id = ?`
-      ).run(name.trim(), nisn.trim(), grade, programKeahlian, phone, email, status, req.params.id)
+      ).run(name.trim(), nisn.trim(), grade, programKeahlian, resolvedEntryYear, phone, email, status, req.params.id)
     } catch (err) {
       if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
         throw new ApiError(409, `NISN ${nisn} is already registered to another student`)

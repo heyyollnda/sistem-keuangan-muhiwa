@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Printer, X } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronUp, Printer, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { GRADES, PROGRAM_KEAHLIAN_OPTIONS } from '../data/mockData'
 import { api, ApiError } from '../lib/api'
@@ -282,6 +282,11 @@ export default function ClassRecap() {
                     <p className="text-xs text-slate-400">NISN {row.student.nisn}</p>
                   </div>
                   <div className="flex items-center gap-4 shrink-0">
+                    {row.unconfiguredGrades.length > 0 && (
+                      <span className="shrink-0" title="Ada nominal yang belum dikonfigurasi">
+                        <AlertCircle size={16} className="text-amber-500" />
+                      </span>
+                    )}
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${meta.badge}`}>
                       {meta.label}
                     </span>
@@ -333,6 +338,16 @@ export default function ClassRecap() {
                     <p className="px-5 pt-2 text-xs text-slate-400">
                       Termasuk {formatCurrency(row.semesterDibayar)} dibayar pada {periodLabel}.
                     </p>
+                  )}
+                  {row.unconfiguredGrades.length > 0 && (
+                    <div className="no-print mx-5 mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 flex items-start gap-2">
+                      <AlertCircle size={13} className="shrink-0 mt-0.5 text-amber-600" />
+                      <p className="text-xs text-amber-800">
+                        Nominal belum dikonfigurasi untuk{' '}
+                        {row.unconfiguredGrades.map((u) => `${u.grade} (${u.tahunAjaran})`).join(', ')} — kategori
+                        dari kelas tersebut tidak muncul dalam rincian di bawah.
+                      </p>
+                    </div>
                   )}
                   <div className="px-5 py-4 space-y-2">
                     {row.rows.map((r) => {

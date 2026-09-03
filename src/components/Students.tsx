@@ -33,6 +33,11 @@ interface FormState {
   nisn: string
   grade: Grade
   programKeahlian: ProgramKeahlian | ''
+  /** Only ever shown/editable on the EDIT form (Bagian 4) — a new student's entryYear is
+   *  auto-computed server-side from grade + today's date instead, so this stays unused when
+   *  adding. Kept as a string (like other numeric form fields in this app) for a controlled
+   *  input; parsed back to a number at submit time. */
+  entryYear: string
   phone: string
   email: string
   status: StudentStatus
@@ -43,6 +48,7 @@ const EMPTY_FORM: FormState = {
   nisn: '',
   grade: 'Kelas 10',
   programKeahlian: '',
+  entryYear: '',
   phone: '',
   email: '',
   status: 'aktif',
@@ -101,6 +107,7 @@ export default function Students() {
       historyStudent.id,
       historyStudent.grade,
       historyStudent.programKeahlian,
+      historyStudent.entryYear,
       feeConfig,
       transactions
     )
@@ -120,6 +127,7 @@ export default function Students() {
       nisn: s.nisn,
       grade: s.grade,
       programKeahlian: s.programKeahlian,
+      entryYear: String(s.entryYear),
       phone: s.phone,
       email: s.email,
       status: s.status,
@@ -143,28 +151,31 @@ export default function Students() {
     const duplicateNisn = students.some((s) => s.id !== editingId && s.nisn.trim() === form.nisn.trim())
     if (duplicateNisn) errs.push('NISN sudah digunakan siswa lain.')
 
+    if (editingId && (!form.entryYear.trim() || !Number.isInteger(Number(form.entryYear)) || Number(form.entryYear) < 2000)) {
+      errs.push('Tahun Masuk (Angkatan) wajib diisi dengan tahun yang valid.')
+    }
+
     if (errs.length > 0) {
       setErrors(errs)
       return
     }
 
-    const payload = {
+    const basePayload = {
       name: form.name.trim(),
       nisn: form.nisn.trim(),
       grade: form.grade,
       programKeahlian: form.programKeahlian as ProgramKeahlian,
       phone: form.phone.trim(),
       email: form.email.trim(),
-      status: form.status,
     }
 
     setSubmitting(true)
     try {
       if (editingId) {
-        await updateStudent(editingId, payload)
+        await updateStudent(editingId, { ...basePayload, status: form.status, entryYear: Number(form.entryYear) })
         showToast('Data siswa berhasil diperbarui.', 'success')
       } else {
-        await addStudent(payload)
+        await addStudent(basePayload)
         showToast('Siswa baru berhasil ditambahkan.', 'success')
       }
       closeForm()
@@ -483,6 +494,23 @@ export default function Students() {
                   </select>
                 </div>
               </div>
+              {editingId && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Tahun Masuk (Angkatan)</label>
+                  <input
+                    type="number"
+                    value={form.entryYear}
+                    onChange={(e) => setForm((f) => ({ ...f, entryYear: e.target.value }))}
+                    placeholder="Contoh: 2026"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                  <p className="text-xs text-slate-400 mt-1.5">
+                    Tahun ajaran saat siswa pertama kali masuk Kelas 10 — menentukan tahun ajaran nominal tagihan
+                    siswa ini di setiap kelas. Nilai ini diisi otomatis saat siswa ditambahkan; ubah hanya jika siswa
+                    pernah tinggal kelas atau datanya tidak akurat.
+                  </p>
+                </div>
+              )}
               {editingId && form.status === 'lulus' && (
                 <p className="text-xs text-slate-400 -mt-2">
                   Siswa ini berstatus alumni. Gunakan aksi &quot;Luluskan Siswa&quot; untuk mengubah status kelulusan.

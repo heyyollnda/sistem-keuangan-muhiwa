@@ -6,12 +6,14 @@ import { useToast } from '../context/ToastContext'
 import { ApiError } from '../lib/api'
 import {
   formatCurrency,
+  findUnconfiguredGrades,
   gradeIndex,
   getArrearsBills,
   getCategoryStatus,
   getFeeCategories,
   getMonthlyBills,
   getPaidForCategory,
+  resolveTahunAjaran,
   toDatetimeLocal,
 } from '../lib/finance'
 import { useClickOutside } from '../lib/useClickOutside'
@@ -174,12 +176,27 @@ export default function PaymentForm() {
 
   const studentId = selectedStudent?.id ?? null
 
-  // Fees are per Kelas + Program Keahlian, not per Kelas alone — with no student selected
-  // there's no program to look them up against, so there's nothing to show yet.
+  // Which tahun ajaran's fee_categories apply to the selected student at the actively-selected
+  // grade — derived from when they first entered Kelas 10, not "whatever's current now".
+  const tahunAjaran = useMemo(
+    () => (selectedStudent ? resolveTahunAjaran(selectedStudent.entryYear, grade) : null),
+    [selectedStudent, grade]
+  )
+
+  // Fees are per Kelas + Program Keahlian + Tahun Ajaran — with no student selected there's no
+  // program/tahun ajaran to look them up against, so there's nothing to show yet.
   const feeCategories = useMemo(() => {
+    if (!selectedStudent || !tahunAjaran) return []
+    return getFeeCategories(feeConfig, grade, selectedStudent.programKeahlian, tahunAjaran)
+  }, [feeConfig, grade, selectedStudent, tahunAjaran])
+
+  // Every grade up to the selected one with no fee_categories configured for the tahun ajaran
+  // that grade resolves to for this student — shown as an explicit warning instead of just
+  // silently rendering empty sections.
+  const unconfiguredGrades = useMemo(() => {
     if (!selectedStudent) return []
-    return getFeeCategories(feeConfig, grade, selectedStudent.programKeahlian)
-  }, [feeConfig, grade, selectedStudent])
+    return findUnconfiguredGrades(grade, selectedStudent.programKeahlian, selectedStudent.entryYear, feeConfig)
+  }, [selectedStudent, grade, feeConfig])
 
   const annualCategories = useMemo(() => feeCategories.filter((c) => c.type === 'tahunan'), [feeCategories])
   const monthlyCategoryDefs = useMemo(() => feeCategories.filter((c) => c.type === 'bulanan'), [feeCategories])
@@ -194,22 +211,39 @@ export default function PaymentForm() {
   }, [annualCategories, studentId, grade, transactions])
 
   const monthlyCategoryRows = useMemo(() => {
-    if (!selectedStudent) return []
+    if (!selectedStudent || !tahunAjaran) return []
     return monthlyCategoryDefs.map((c) => {
-      const bills = getMonthlyBills(selectedStudent.id, grade, selectedStudent.programKeahlian, c, feeConfig, transactions)
+      const bills = getMonthlyBills(
+        selectedStudent.id,
+        grade,
+        selectedStudent.programKeahlian,
+        tahunAjaran,
+        c,
+        feeConfig,
+        transactions
+      )
       const paidCount = bills.filter((b) => b.status === 'lunas').length
       const totalDue = bills.reduce((s, b) => s + b.due, 0)
       const totalPaid = bills.reduce((s, b) => s + b.paid, 0)
       return { category: c, bills, paidCount, totalDue, totalPaid }
     })
-  }, [monthlyCategoryDefs, selectedStudent, grade, feeConfig, transactions])
+  }, [monthlyCategoryDefs, selectedStudent, grade, tahunAjaran, feeConfig, transactions])
 
   // Flattened per-bill view of every unpaid item from grades before the selected one — one
   // entry per specific unpaid month (bulanan) or per whole category (tahunan), which is
-  // exactly the granularity this form now needs for individually checkable rows.
+  // exactly the granularity this form now needs for individually checkable rows. Each prior
+  // grade resolves its OWN tahun ajaran from the student's entryYear, so an arrears bill is
+  // always priced at whatever was charged the year the student was actually in that grade.
   const arrearsBills = useMemo(() => {
     if (!selectedStudent) return []
-    return getArrearsBills(selectedStudent.id, grade, selectedStudent.programKeahlian, feeConfig, transactions)
+    return getArrearsBills(
+      selectedStudent.id,
+      grade,
+      selectedStudent.programKeahlian,
+      selectedStudent.entryYear,
+      feeConfig,
+      transactions
+    )
   }, [selectedStudent, grade, feeConfig, transactions])
 
   const arrearsTotal = arrearsBills.reduce((s, b) => s + b.outstanding, 0)
@@ -491,6 +525,12 @@ export default function PaymentForm() {
                     {selectedStudent.status !== 'aktif' && <StudentStatusBadge status={selectedStudent.status} />}
                   </div>
                 )}
+                {selectedStudent && tahunAjaran && (
+                  <p className="mt-1.5 text-xs text-slate-400">
+                    Angkatan {selectedStudent.entryYear} — tagihan {grade} mengikuti nominal tahun ajaran{' '}
+                    <strong className="text-slate-500">{tahunAjaran}</strong>
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
@@ -538,6 +578,25 @@ export default function PaymentForm() {
                   ? 'Centang kategori yang dibayar, lalu isi nominalnya masing-masing.'
                   : 'Pilih siswa terlebih dahulu untuk menampilkan kategori pembayaran.'}
               </p>
+
+              {selectedStudent && unconfiguredGrades.length > 0 && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-2 mb-3">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5 text-amber-600" />
+                  <p className="text-sm text-amber-800">
+                    Nominal belum dikonfigurasi untuk{' '}
+                    {unconfiguredGrades.map((u, i) => (
+                      <span key={u.grade}>
+                        {i > 0 && ', '}
+                        <strong>
+                          {u.grade} tahun ajaran {u.tahunAjaran}
+                        </strong>
+                      </span>
+                    ))}{' '}
+                    ({selectedStudent.programKeahlian}). Kategori dan tunggakan dari kelas tersebut tidak akan
+                    muncul sampai nominalnya diatur di halaman Pengaturan Nominal.
+                  </p>
+                </div>
+              )}
 
               {!selectedStudent ? (
                 <p className="text-sm text-slate-400 text-center py-6">Belum ada siswa dipilih.</p>

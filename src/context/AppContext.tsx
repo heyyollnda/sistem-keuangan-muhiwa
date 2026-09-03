@@ -28,8 +28,8 @@ interface AppContextValue {
   students: Student[]
   studentsLoading: boolean
   studentsError: string | null
-  addStudent: (student: Omit<Student, 'id' | 'status'>) => Promise<Student>
-  importStudents: (students: Omit<Student, 'id' | 'status'>[]) => Promise<ImportStudentsResult>
+  addStudent: (student: NewStudentInput) => Promise<Student>
+  importStudents: (students: NewStudentInput[]) => Promise<ImportStudentsResult>
   updateStudent: (studentId: string, updates: Omit<Student, 'id'>) => Promise<Student>
   updateStudentGrade: (studentId: string, grade: Student['grade']) => void
   updateStudentStatus: (studentId: string, status: Student['status']) => Promise<void>
@@ -46,14 +46,26 @@ interface AppContextValue {
   feeConfigLoading: boolean
   feeConfigError: string | null
   updateFeeConfig: (config: FeeConfig) => Promise<void>
-  addFeeCategory: (grade: Grade, programKeahlian: ProgramKeahlian, category: FeeCategory) => Promise<FeeCategory>
-  deleteFeeCategory: (grade: Grade, programKeahlian: ProgramKeahlian, categoryId: string) => Promise<void>
+  addFeeCategory: (
+    grade: Grade,
+    programKeahlian: ProgramKeahlian,
+    tahunAjaran: string,
+    category: FeeCategory
+  ) => Promise<FeeCategory>
+  deleteFeeCategory: (grade: Grade, programKeahlian: ProgramKeahlian, tahunAjaran: string, categoryId: string) => Promise<void>
+  copyFeeConfigFromPreviousYear: (toTahunAjaran: string) => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
 
 // What PaymentForm submits to create a transaction — id/totalPaid/change are computed by the
 // backend (POST /api/transactions), not invented client-side.
+// What addStudent/importStudents submit — entryYear is optional here (unlike the full Student
+// type) because Bagian 4's editable "Tahun Masuk (Angkatan)" field only exists on the EDIT
+// form; a freshly-added/imported student instead gets it auto-computed server-side from their
+// grade + today's date (POST /api/students, POST /api/students/import) when omitted.
+export type NewStudentInput = Omit<Student, 'id' | 'status' | 'entryYear'> & { entryYear?: number }
+
 export interface NewTransactionInput {
   studentId: string
   date: string
@@ -118,6 +130,7 @@ interface FeeCategoryApiRow {
   categoryKey: string
   grade: Grade
   programKeahlian: ProgramKeahlian
+  tahunAjaran: string
   name: string
   type: CategoryType
   amount: number
@@ -195,7 +208,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const config: FeeConfig = {}
     const idMap = new Map<string, number>()
     for (const row of rows) {
-      const key = classKey(row.grade, row.programKeahlian)
+      const key = classKey(row.grade, row.programKeahlian, row.tahunAjaran)
       const category: FeeCategory = { id: row.categoryKey, name: row.name, amount: row.amount, type: row.type, note: row.note }
       config[key] = [...(config[key] ?? []), category]
       idMap.set(`${key}::${row.categoryKey}`, row.id)
@@ -312,15 +325,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoggedIn])
 
-  const addStudent = async (student: Omit<Student, 'id' | 'status'>): Promise<Student> => {
+  const addStudent = async (student: NewStudentInput): Promise<Student> => {
     const created = await api.post<Student>('/students', student)
     setStudents((prev) => [...prev, created])
     return created
   }
 
-  const importStudents = async (
-    newStudents: Omit<Student, 'id' | 'status'>[]
-  ): Promise<ImportStudentsResult> => {
+  const importStudents = async (newStudents: NewStudentInput[]): Promise<ImportStudentsResult> => {
     const result = await api.post<ImportStudentsResult>('/students/import', { students: newStudents })
     setStudents((prev) => [...prev, ...result.created])
     return result
@@ -384,7 +395,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const puts: Promise<FeeCategoryApiRow>[] = []
     for (const [key, categories] of Object.entries(config)) {
       const previous = feeConfig[key] ?? []
-      const { grade, programKeahlian } = parseClassKey(key)
+      const { grade, programKeahlian, tahunAjaran } = parseClassKey(key)
       for (const cat of categories) {
         const prevCat = previous.find((c) => c.id === cat.id)
         if (!prevCat || prevCat.amount === cat.amount) continue
@@ -395,6 +406,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             categoryKey: cat.id,
             grade,
             programKeahlian,
+            tahunAjaran,
             name: cat.name,
             type: cat.type,
             amount: cat.amount,
@@ -421,18 +433,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addFeeCategory = async (
     grade: Grade,
     programKeahlian: ProgramKeahlian,
+    tahunAjaran: string,
     category: FeeCategory
   ): Promise<FeeCategory> => {
     const row = await api.post<FeeCategoryApiRow>('/fee-categories', {
       categoryKey: category.id,
       grade,
       programKeahlian,
+      tahunAjaran,
       name: category.name,
       type: category.type,
       amount: category.amount,
       note: category.note,
     })
-    const key = classKey(grade, programKeahlian)
+    const key = classKey(grade, programKeahlian, tahunAjaran)
     const created: FeeCategory = { id: row.categoryKey, name: row.name, amount: row.amount, type: row.type, note: row.note }
     feeCategoryDbIds.current.set(`${key}::${created.id}`, row.id)
     setFeeConfig((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), created] }))
@@ -442,14 +456,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteFeeCategory = async (
     grade: Grade,
     programKeahlian: ProgramKeahlian,
+    tahunAjaran: string,
     categoryId: string
   ): Promise<void> => {
-    const key = classKey(grade, programKeahlian)
+    const key = classKey(grade, programKeahlian, tahunAjaran)
     const dbId = feeCategoryDbIds.current.get(`${key}::${categoryId}`)
     if (dbId === undefined) throw new ApiError(404, 'Kategori tidak ditemukan.')
     await api.delete(`/fee-categories/${dbId}`)
     feeCategoryDbIds.current.delete(`${key}::${categoryId}`)
     setFeeConfig((prev) => ({ ...prev, [key]: (prev[key] ?? []).filter((c) => c.id !== categoryId) }))
+  }
+
+  // POST /api/fee-categories/copy-year — bulk-copies every category from the most recent
+  // existing tahun ajaran into a brand new (currently empty) one. Powers Pengaturan Nominal's
+  // "Salin dari Tahun Sebelumnya" button.
+  const copyFeeConfigFromPreviousYear = async (toTahunAjaran: string): Promise<void> => {
+    await api.post(`/fee-categories/copy-year`, { toTahunAjaran })
+    await loadFeeConfig()
   }
 
   const value = useMemo(
@@ -482,6 +505,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateFeeConfig,
       addFeeCategory,
       deleteFeeCategory,
+      copyFeeConfigFromPreviousYear,
     }),
     [
       isLoggedIn,

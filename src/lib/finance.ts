@@ -67,13 +67,47 @@ export function generateTransactionId(existing: { id: string }[], date: Date): s
   return `${prefix}${String(seq).padStart(4, '0')}`
 }
 
-/** Every fee category configured for one specific Kelas + Program Keahlian combination. */
+/** The tahun ajaran ("2026/2027") a student's fees are billed under at a given grade, derived
+ *  from when they first entered Kelas 10 — Kelas 11 is entryYear+1, Kelas 12 is entryYear+2.
+ *  Mirrors server/src/lib/breakdown.js's resolveTahunAjaran exactly; keep both in lockstep. */
+export function resolveTahunAjaran(entryYear: number, grade: Grade): string {
+  const year = entryYear + gradeIndex(grade)
+  return `${year}/${year + 1}`
+}
+
+/** The tahun ajaran ("2026/2027") currently underway, from today's date — Jul-Dec is this
+ *  year/next, Jan-Jun is last year/this year. Used only to default UI pickers (Pengaturan
+ *  Nominal's Tahun Ajaran selector); billing itself always resolves per-student via
+ *  resolveTahunAjaran, never "whatever's current now". */
+export function getCurrentTahunAjaran(now: Date = new Date()): string {
+  const month = now.getMonth() + 1
+  const year = month >= 7 ? now.getFullYear() : now.getFullYear() - 1
+  return `${year}/${year + 1}`
+}
+
+/** Every fee category configured for one specific Kelas + Program Keahlian + Tahun Ajaran
+ *  combination. Empty when that combination simply hasn't been configured yet in Pengaturan
+ *  Nominal — callers that need to tell staff about that check isTahunAjaranConfigured below,
+ *  rather than assuming an empty array always means "genuinely zero categories on purpose". */
 export function getFeeCategories(
   feeConfig: FeeConfig,
   grade: Grade,
-  programKeahlian: ProgramKeahlian
+  programKeahlian: ProgramKeahlian,
+  tahunAjaran: string
 ): FeeCategory[] {
-  return feeConfig[classKey(grade, programKeahlian)] ?? []
+  return feeConfig[classKey(grade, programKeahlian, tahunAjaran)] ?? []
+}
+
+/** True when Pengaturan Nominal has ANY categories configured for this Kelas + Program +
+ *  Tahun Ajaran — false is the "belum dikonfigurasi" case the New Transaction form and
+ *  breakdown views warn staff about. */
+export function isTahunAjaranConfigured(
+  feeConfig: FeeConfig,
+  grade: Grade,
+  programKeahlian: ProgramKeahlian,
+  tahunAjaran: string
+): boolean {
+  return classKey(grade, programKeahlian, tahunAjaran) in feeConfig
 }
 
 /**
@@ -123,11 +157,12 @@ function isRegistrasiFullyPaid(
   studentId: string,
   grade: Grade,
   programKeahlian: ProgramKeahlian,
+  tahunAjaran: string,
   feeConfig: FeeConfig,
   transactions: Transaction[]
 ): boolean {
   if (grade !== 'Kelas 10') return false
-  const registrasi = getFeeCategories(feeConfig, grade, programKeahlian).find(
+  const registrasi = getFeeCategories(feeConfig, grade, programKeahlian, tahunAjaran).find(
     (c) => c.id === 'registrasi' && c.type === 'tahunan'
   )
   if (!registrasi || registrasi.amount <= 0) return false
@@ -139,12 +174,14 @@ export function getMonthlyBills(
   studentId: string,
   grade: Grade,
   programKeahlian: ProgramKeahlian,
+  tahunAjaran: string,
   category: FeeCategory,
   feeConfig: FeeConfig,
   transactions: Transaction[]
 ): MonthlyBill[] {
   const julyCoveredByRegistrasi =
-    category.id === 'spp' && isRegistrasiFullyPaid(studentId, grade, programKeahlian, feeConfig, transactions)
+    category.id === 'spp' &&
+    isRegistrasiFullyPaid(studentId, grade, programKeahlian, tahunAjaran, feeConfig, transactions)
 
   return SCHOOL_MONTHS.map((month) => {
     const due = category.amount
@@ -165,18 +202,21 @@ export function getMonthlyBills(
   })
 }
 
-/** Outstanding fees for a specific grade — monthly categories are summed across all 12 months. */
+/** Outstanding fees for a specific grade — monthly categories are summed across all 12 months.
+ *  `entryYear` resolves which tahun ajaran's fee_categories apply at this grade. */
 export function getOutstandingForGrade(
   studentId: string,
   grade: Grade,
   programKeahlian: ProgramKeahlian,
+  entryYear: number,
   feeConfig: FeeConfig,
   transactions: Transaction[]
 ): OutstandingRow[] {
+  const tahunAjaran = resolveTahunAjaran(entryYear, grade)
   const rows: OutstandingRow[] = []
-  for (const cat of getFeeCategories(feeConfig, grade, programKeahlian)) {
+  for (const cat of getFeeCategories(feeConfig, grade, programKeahlian, tahunAjaran)) {
     if (cat.type === 'bulanan') {
-      const bills = getMonthlyBills(studentId, grade, programKeahlian, cat, feeConfig, transactions)
+      const bills = getMonthlyBills(studentId, grade, programKeahlian, tahunAjaran, cat, feeConfig, transactions)
       const outstanding = bills.reduce((s, b) => s + b.outstanding, 0)
       if (outstanding > 0) {
         rows.push({
@@ -215,11 +255,15 @@ export interface ArrearsBill {
 
 /** Every unpaid bill from grades strictly before the given grade, within the student's own
  *  program, flattened down to one entry per month (monthly categories) or per category
- *  (annual) — this is the allocation-ready form; see getArrears for the summarized display form. */
+ *  (annual) — this is the allocation-ready form; see getArrears for the summarized display form.
+ *  `entryYear` resolves which tahun ajaran's fee_categories applied at each of those prior
+ *  grades (a Kelas 11 student's Kelas 10 arrears are priced at whatever was charged the year
+ *  THEY were in Kelas 10, not this year's price). */
 export function getArrearsBills(
   studentId: string,
   grade: Grade,
   programKeahlian: ProgramKeahlian,
+  entryYear: number,
   feeConfig: FeeConfig,
   transactions: Transaction[]
 ): ArrearsBill[] {
@@ -227,9 +271,10 @@ export function getArrearsBills(
   const bills: ArrearsBill[] = []
   for (let i = 0; i < idx; i++) {
     const priorGrade = GRADES[i]
-    for (const cat of getFeeCategories(feeConfig, priorGrade, programKeahlian)) {
+    const tahunAjaran = resolveTahunAjaran(entryYear, priorGrade)
+    for (const cat of getFeeCategories(feeConfig, priorGrade, programKeahlian, tahunAjaran)) {
       if (cat.type === 'bulanan') {
-        const monthly = getMonthlyBills(studentId, priorGrade, programKeahlian, cat, feeConfig, transactions)
+        const monthly = getMonthlyBills(studentId, priorGrade, programKeahlian, tahunAjaran, cat, feeConfig, transactions)
         for (const b of monthly) {
           if (b.outstanding > 0) {
             bills.push({
@@ -261,10 +306,11 @@ export function getArrears(
   studentId: string,
   grade: Grade,
   programKeahlian: ProgramKeahlian,
+  entryYear: number,
   feeConfig: FeeConfig,
   transactions: Transaction[]
 ): OutstandingRow[] {
-  const bills = getArrearsBills(studentId, grade, programKeahlian, feeConfig, transactions)
+  const bills = getArrearsBills(studentId, grade, programKeahlian, entryYear, feeConfig, transactions)
   const rows: OutstandingRow[] = []
   const index = new Map<string, OutstandingRow>()
   for (const b of bills) {
@@ -292,13 +338,14 @@ export function getTotalOutstandingForStudent(
   studentId: string,
   currentGrade: Grade,
   programKeahlian: ProgramKeahlian,
+  entryYear: number,
   feeConfig: FeeConfig,
   transactions: Transaction[]
 ): number {
   const idx = gradeIndex(currentGrade)
   let total = 0
   for (let i = 0; i <= idx; i++) {
-    total += getOutstandingForGrade(studentId, GRADES[i], programKeahlian, feeConfig, transactions).reduce(
+    total += getOutstandingForGrade(studentId, GRADES[i], programKeahlian, entryYear, feeConfig, transactions).reduce(
       (s, r) => s + r.outstanding,
       0
     )
@@ -345,6 +392,7 @@ export function getStudentCategoryBreakdown(
   studentId: string,
   currentGrade: Grade,
   programKeahlian: ProgramKeahlian,
+  entryYear: number,
   feeConfig: FeeConfig,
   transactions: Transaction[]
 ): CategoryBreakdownRow[] {
@@ -352,9 +400,10 @@ export function getStudentCategoryBreakdown(
   const rows: CategoryBreakdownRow[] = []
   for (let i = 0; i <= idx; i++) {
     const grade = GRADES[i]
-    for (const cat of getFeeCategories(feeConfig, grade, programKeahlian)) {
+    const tahunAjaran = resolveTahunAjaran(entryYear, grade)
+    for (const cat of getFeeCategories(feeConfig, grade, programKeahlian, tahunAjaran)) {
       if (cat.type === 'bulanan') {
-        const bills = getMonthlyBills(studentId, grade, programKeahlian, cat, feeConfig, transactions)
+        const bills = getMonthlyBills(studentId, grade, programKeahlian, tahunAjaran, cat, feeConfig, transactions)
         const due = bills.reduce((s, b) => s + b.due, 0)
         const paid = bills.reduce((s, b) => s + b.paid, 0)
         rows.push({
@@ -389,6 +438,28 @@ export function getStudentCategoryBreakdown(
   return rows
 }
 
+/** Grades (up to currentGrade) with no fee_categories configured for the tahun ajaran
+ *  resolveTahunAjaran(entryYear, grade) resolves to — what PaymentForm and the breakdown modal
+ *  check to show "Nominal belum dikonfigurasi untuk [Kelas] tahun ajaran [X]" instead of just
+ *  silently showing nothing. */
+export function findUnconfiguredGrades(
+  currentGrade: Grade,
+  programKeahlian: ProgramKeahlian,
+  entryYear: number,
+  feeConfig: FeeConfig
+): { grade: Grade; tahunAjaran: string }[] {
+  const idx = gradeIndex(currentGrade)
+  const missing: { grade: Grade; tahunAjaran: string }[] = []
+  for (let i = 0; i <= idx; i++) {
+    const grade = GRADES[i]
+    const tahunAjaran = resolveTahunAjaran(entryYear, grade)
+    if (!isTahunAjaranConfigured(feeConfig, grade, programKeahlian, tahunAjaran)) {
+      missing.push({ grade, tahunAjaran })
+    }
+  }
+  return missing
+}
+
 /** Remaining balance for one specific paid item (a receipt line, an arrears line) — month-aware
  *  for "bulanan" categories, whole-category for "tahunan" ones. */
 export function getRemainingForItem(
@@ -397,13 +468,14 @@ export function getRemainingForItem(
   categoryId: string,
   month: SchoolMonth | undefined,
   programKeahlian: ProgramKeahlian,
+  tahunAjaran: string,
   feeConfig: FeeConfig,
   transactions: Transaction[]
 ): number {
-  const cat = getFeeCategories(feeConfig, grade, programKeahlian).find((c) => c.id === categoryId)
+  const cat = getFeeCategories(feeConfig, grade, programKeahlian, tahunAjaran).find((c) => c.id === categoryId)
   if (!cat) return 0
   if (cat.type === 'bulanan' && month) {
-    const bills = getMonthlyBills(studentId, grade, programKeahlian, cat, feeConfig, transactions)
+    const bills = getMonthlyBills(studentId, grade, programKeahlian, tahunAjaran, cat, feeConfig, transactions)
     return bills.find((b) => b.month === month)?.outstanding ?? 0
   }
   const paid = getPaidForCategory(studentId, grade, categoryId, transactions)

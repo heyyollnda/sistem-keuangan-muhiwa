@@ -3,6 +3,7 @@ import { db } from '../../db/connection.js'
 import { GRADES, STUDENT_STATUSES } from '../lib/constants.js'
 import {
   computeBreakdown,
+  findUnconfiguredGrades,
   loadActiveFeeCategoriesByClass,
   loadPaidMap,
   loadPeriodPaidMap,
@@ -19,6 +20,7 @@ function studentToApi(row) {
     nisn: row.nisn,
     grade: row.grade,
     programKeahlian: row.program_keahlian,
+    entryYear: row.entry_year,
     status: row.status,
   }
 }
@@ -61,7 +63,8 @@ router.get(
       const paidCategories = breakdown.filter((r) => r.paid > 0).map((r) => r.categoryName)
       const totalPaid = totalPaidMap.get(s.id) ?? 0
       const paymentStatus = outstanding <= 0 ? 'lunas' : totalPaid > 0 ? 'dicicil' : 'belum'
-      return { student: studentToApi(s), totalPaid, outstanding, paidCategories, paymentStatus }
+      const unconfiguredGrades = findUnconfiguredGrades(s, feeCategoriesByClass)
+      return { student: studentToApi(s), totalPaid, outstanding, paidCategories, paymentStatus, unconfiguredGrades }
     })
 
     rows.sort((a, b) => b.outstanding - a.outstanding)
@@ -106,7 +109,8 @@ router.get(
         0
       )
       const status = sisa <= 0 ? 'lunas' : totalDibayar > 0 ? 'dicicil' : 'belum'
-      return { student: studentToApi(s), rows: rows2, totalTagihan, totalDibayar, semesterDibayar, sisa, status }
+      const unconfiguredGrades = findUnconfiguredGrades(s, feeCategoriesByClass)
+      return { student: studentToApi(s), rows: rows2, totalTagihan, totalDibayar, semesterDibayar, sisa, status, unconfiguredGrades }
     })
 
     rows.sort((a, b) => b.sisa - a.sisa)

@@ -8,6 +8,11 @@ PRAGMA foreign_keys = ON;
 -- One row per enrolled/graduated/withdrawn student. `status` distinguishes currently-enrolled
 -- ("aktif") from graduated ("lulus") and withdrawn-mid-semester ("keluar") students — none of
 -- these rows are ever deleted, only their status flips.
+-- `entry_year` is the tahun ajaran (starting year, e.g. 2026 for "2026/2027") the student
+-- FIRST entered Kelas 10 — the anchor resolveTahunAjaran() uses to work out which year's
+-- fee_categories row applies to this student at any given grade (Kelas 11 = entry_year+1,
+-- Kelas 12 = entry_year+2). Assumed correct on a straight, no-repeated-grade path; staff can
+-- correct it by hand via Edit Siswa for a student who ever tinggal kelas.
 CREATE TABLE IF NOT EXISTS students (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -16,6 +21,7 @@ CREATE TABLE IF NOT EXISTS students (
   program_keahlian TEXT NOT NULL CHECK (program_keahlian IN (
     'TJKT', 'PM', 'MPLB', 'AKL', 'KES'
   )),
+  entry_year INTEGER NOT NULL,
   phone TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'aktif' CHECK (status IN ('aktif', 'lulus', 'keluar')),
@@ -27,18 +33,23 @@ CREATE INDEX IF NOT EXISTS idx_students_grade ON students(grade);
 CREATE INDEX IF NOT EXISTS idx_students_status ON students(status);
 CREATE INDEX IF NOT EXISTS idx_students_program ON students(program_keahlian);
 
--- One row per payment category, scoped to one Kelas + Program Keahlian combination (this is
--- what FeeConfig[classKey(grade, programKeahlian)] represents in the frontend). `category_key`
--- is the stable slug used elsewhere ('spp', 'registrasi', 'infak', ...) — the frontend's July-SPP
--- auto-covered-by-Registrasi rule and receipt/history displays key off this, not the surrogate id.
--- `type` = 'bulanan' (billed as 12 independent monthly installments) or 'tahunan' (one bill per
--- school year). There is deliberately no separate "optional/mandatory" flag: the current frontend
--- FeeCategory type dropped that field when categories gained `type`, so this schema matches that.
--- `active` implements delete-as-soft-delete: a category that has ever been used in a transaction
--- is flagged active=0 instead of being hard-deleted, so historical transaction_items rows (which
--- only soft-reference category_key, not a foreign key) keep a category row to point back to.
--- GET /api/fee-categories only returns active=1 rows, so the frontend never needs to know this
--- column exists — a deleted category simply stops appearing, same as a real delete would look.
+-- One row per payment category, scoped to one Kelas + Program Keahlian + Tahun Ajaran
+-- combination (this is what FeeConfig[classKey(grade, programKeahlian, tahunAjaran)]
+-- represents in the frontend) — fees go up every year, so the same category/grade/program can
+-- have several rows, one per tahun_ajaran ("2025/2026", "2026/2027", ...), each with its own
+-- amount. Which row applies to a given student+grade is resolved via resolveTahunAjaran(
+-- student.entry_year, grade) in finance.ts/breakdown.js, never just "whatever's active now".
+-- `category_key` is the stable slug used elsewhere ('spp', 'registrasi', 'infak', ...) — the
+-- frontend's July-SPP auto-covered-by-Registrasi rule and receipt/history displays key off
+-- this, not the surrogate id. `type` = 'bulanan' (billed as 12 independent monthly
+-- installments) or 'tahunan' (one bill per school year). There is deliberately no separate
+-- "optional/mandatory" flag: the current frontend FeeCategory type dropped that field when
+-- categories gained `type`, so this schema matches that. `active` implements delete-as-soft-
+-- delete: a category that has ever been used in a transaction is flagged active=0 instead of
+-- being hard-deleted, so historical transaction_items rows (which only soft-reference
+-- category_key, not a foreign key) keep a category row to point back to. GET /api/fee-
+-- categories only returns active=1 rows, so the frontend never needs to know this column
+-- exists — a deleted category simply stops appearing, same as a real delete would look.
 CREATE TABLE IF NOT EXISTS fee_categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   category_key TEXT NOT NULL,
@@ -46,6 +57,7 @@ CREATE TABLE IF NOT EXISTS fee_categories (
   program_keahlian TEXT NOT NULL CHECK (program_keahlian IN (
     'TJKT', 'PM', 'MPLB', 'AKL', 'KES'
   )),
+  tahun_ajaran TEXT NOT NULL,
   name TEXT NOT NULL,
   type TEXT NOT NULL CHECK (type IN ('bulanan', 'tahunan')),
   amount INTEGER NOT NULL CHECK (amount >= 0),
@@ -53,10 +65,10 @@ CREATE TABLE IF NOT EXISTS fee_categories (
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (grade, program_keahlian, category_key)
+  UNIQUE (grade, program_keahlian, tahun_ajaran, category_key)
 );
 
-CREATE INDEX IF NOT EXISTS idx_fee_categories_class ON fee_categories(grade, program_keahlian);
+CREATE INDEX IF NOT EXISTS idx_fee_categories_class ON fee_categories(grade, program_keahlian, tahun_ajaran);
 CREATE INDEX IF NOT EXISTS idx_fee_categories_active ON fee_categories(active);
 
 -- One row per recorded payment (a "receipt"). student_name/nisn/grade/program_keahlian are

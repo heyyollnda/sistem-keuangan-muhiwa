@@ -455,7 +455,8 @@ export default function Reports() {
                 )}
                 {!arrearsLoading &&
                   !arrearsError &&
-                  displayedArrears.map(({ student, totalPaid, outstanding, paidCategories, paymentStatus }) => (
+                  displayedArrears.map(
+                    ({ student, totalPaid, outstanding, paidCategories, paymentStatus, unconfiguredGrades }) => (
                   <tr key={student.id} className="hover:bg-slate-50/60">
                     <td className="px-5 py-3 font-medium text-slate-700 whitespace-nowrap">{student.name}</td>
                     <td className="px-5 py-3 whitespace-nowrap text-slate-700">{student.grade}</td>
@@ -465,6 +466,13 @@ export default function Reports() {
                     </td>
                     <td className="px-5 py-3 text-slate-600 min-w-48">
                       {paidCategories.length > 0 ? paidCategories.join(', ') : '-'}
+                      {unconfiguredGrades.length > 0 && (
+                        <p className="flex items-start gap-1 text-[11px] text-amber-600 mt-1">
+                          <AlertCircle size={11} className="shrink-0 mt-0.5" />
+                          Nominal belum diatur:{' '}
+                          {unconfiguredGrades.map((u) => `${u.grade} (${u.tahunAjaran})`).join(', ')}
+                        </p>
+                      )}
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap text-right font-semibold text-slate-800">
                       {formatCurrency(totalPaid)}

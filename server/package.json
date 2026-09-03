@@ -12,7 +12,10 @@
     "reset-data": "node db/reset-dummy-data.js",
     "migrate-program-keahlian": "node db/migrate-rename-program-keahlian.js",
     "fix-misfiled-current-items": "node db/fix-misfiled-current-items.js",
-    "migrate-status-keluar": "node db/migrate-add-status-keluar.js"
+    "migrate-status-keluar": "node db/migrate-add-status-keluar.js",
+    "migrate-add-tahun-ajaran": "node db/migrate-add-tahun-ajaran.js",
+    "audit-category-keys": "node db/audit-category-keys.js",
+    "fix-category-keys": "node db/fix-category-keys.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",
