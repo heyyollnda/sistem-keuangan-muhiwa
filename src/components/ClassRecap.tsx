@@ -1,10 +1,20 @@
 import { AlertCircle, ChevronDown, ChevronUp, Printer, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { GRADES, PROGRAM_KEAHLIAN_OPTIONS } from '../data/mockData'
+import { useApp } from '../context/AppContext'
 import { api, ApiError } from '../lib/api'
+import { parseClassKey } from '../lib/classKey'
 import { formatCurrency, formatDateTime } from '../lib/finance'
 import type { ClassSummaryRow, Grade, ProgramKeahlian } from '../types'
 import SchoolLogo from './SchoolLogo'
+
+// How many years back the "Tahun" dropdown reaches by default, from whatever the current
+// year actually is — never a fixed list of literal years, so nothing here needs editing once
+// those years pass. Extended further back automatically below if fee_categories has genuinely
+// older tahun ajaran configured than this window covers; never trimmed shorter than this even
+// if the school's data doesn't go back that far, so the dropdown always offers a reasonable
+// amount of browsing room from day one.
+const DEFAULT_YEAR_LOOKBACK = 5
 
 type SemesterType = 'ganjil' | 'genap' | 'custom'
 type ParentStatus = 'lunas' | 'dicicil' | 'belum'
@@ -33,6 +43,7 @@ function toDateParam(d: Date): string {
 }
 
 export default function ClassRecap() {
+  const { feeConfig } = useApp()
   const now = new Date()
   const [selectedGrade, setSelectedGrade] = useState<Grade>('Kelas 10')
   const [majorFilter, setMajorFilter] = useState<'all' | ProgramKeahlian>('all')
@@ -48,7 +59,22 @@ export default function ClassRecap() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const yearOptions = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1]
+  // Always reaches from `currentYear - DEFAULT_YEAR_LOOKBACK` through `currentYear + 1` — and
+  // further back still if fee_categories has an even older tahun ajaran configured, so a
+  // school with several years of history in the system never has an actual year hidden from
+  // this dropdown. Newest first, since the list can now run to 6+ entries.
+  const yearOptions = useMemo(() => {
+    const currentYear = now.getFullYear()
+    let earliestYear = currentYear - DEFAULT_YEAR_LOOKBACK
+    for (const key of Object.keys(feeConfig)) {
+      const startYear = Number(parseClassKey(key).tahunAjaran.split('/')[0])
+      if (Number.isFinite(startYear) && startYear < earliestYear) earliestYear = startYear
+    }
+    const years: number[] = []
+    for (let y = currentYear + 1; y >= earliestYear; y--) years.push(y)
+    return years
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feeConfig])
 
   const range = useMemo(() => {
     if (semesterType === 'custom') {

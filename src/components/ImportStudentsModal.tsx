@@ -14,6 +14,7 @@ import { useApp } from '../context/AppContext'
 import { useToast } from '../context/ToastContext'
 import { ApiError } from '../lib/api'
 import { buildImportRows, downloadImportTemplate, parseImportFile, type ImportRow } from '../lib/studentImport'
+import ScrollableTable from './ScrollableTable'
 
 interface Props {
   onClose: () => void
@@ -183,7 +184,7 @@ export default function ImportStudentsModal({ onClose }: Props) {
                 </span>
               </div>
 
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <ScrollableTable className="overflow-x-auto rounded-lg border border-slate-200">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-400 uppercase">
@@ -226,7 +227,7 @@ export default function ImportStudentsModal({ onClose }: Props) {
                     })}
                   </tbody>
                 </table>
-              </div>
+              </ScrollableTable>
 
               {summary.warning > 0 && (
                 <p className="text-xs text-amber-600">

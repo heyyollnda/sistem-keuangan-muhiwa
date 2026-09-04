@@ -21,6 +21,7 @@ import { ApiError } from '../lib/api'
 import { formatCurrency, formatDateTime, getStudentCategoryBreakdown } from '../lib/finance'
 import Header from './Header'
 import ImportStudentsModal from './ImportStudentsModal'
+import ScrollableTable from './ScrollableTable'
 import { CategoryStatusBadge, StudentStatusBadge } from './StatusBadges'
 import type { Grade, ProgramKeahlian, Student, StudentStatus } from '../types'
 
@@ -298,7 +299,7 @@ export default function Students() {
       </section>
 
       <section className="rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <ScrollableTable className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-400 uppercase">
@@ -424,7 +425,7 @@ export default function Students() {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollableTable>
       </section>
 
       {formOpen && (

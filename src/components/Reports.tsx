@@ -8,6 +8,7 @@ import { formatCurrency, formatDateTime, toDatetimeLocal } from '../lib/finance'
 import type { ArrearsItem, ArrearsSummaryRow, Grade, PaymentItem, StudentStatus, Transaction } from '../types'
 import ClassRecap from './ClassRecap'
 import Header from './Header'
+import ScrollableTable from './ScrollableTable'
 import { StudentStatusBadge } from './StatusBadges'
 
 type PaymentStatus = 'lunas' | 'dicicil' | 'belum'
@@ -306,7 +307,7 @@ export default function Reports() {
               Total: {formatCurrency(totalCollected)} ({filteredTransactions.length} transaksi)
             </span>
           </div>
-          <div className="overflow-x-auto">
+          <ScrollableTable className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-400 uppercase">
@@ -391,7 +392,7 @@ export default function Reports() {
                 })}
               </tbody>
             </table>
-          </div>
+          </ScrollableTable>
         </section>
 
         <section className="rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
@@ -417,7 +418,7 @@ export default function Reports() {
               <option value="keluar">Keluar</option>
             </select>
           </div>
-          <div className="overflow-x-auto">
+          <ScrollableTable className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-400 uppercase">
@@ -491,7 +492,7 @@ export default function Reports() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollableTable>
         </section>
       </div>
         </>
