@@ -1,4 +1,17 @@
-import { AlertCircle, AlertTriangle, Copy, Info, Loader2, Plus, Save, Settings2, Trash2, X } from 'lucide-react'
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  Info,
+  Link2,
+  Loader2,
+  Plus,
+  Save,
+  Settings2,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { GRADES, PROGRAM_KEAHLIAN_OPTIONS } from '../data/mockData'
 import { useApp } from '../context/AppContext'
@@ -70,25 +83,32 @@ function normalizeName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+interface SimilarCategoryMatch {
+  tahunAjaran: string
+  category: FeeCategory
+}
+
 /** Finds a category with a matching (normalized) name in the SAME Kelas + Program Keahlian,
  *  in any OTHER tahun ajaran — the situation "Tambah Kategori" is prone to silently mis-key
  *  (see audit-category-keys.js), since it slugifies whatever name is typed with no memory of
- *  what a prior tahun ajaran already called the same concept. Returns the tahun ajaran of the
- *  first match found, or null if the name is new. */
+ *  what a prior tahun ajaran already called the same concept. Returns the matched category
+ *  (so its category_key can be reused verbatim — see "Pakai Kode yang Sama" below) and which
+ *  tahun ajaran it's in, or null if the name is new. */
 function findSimilarCategoryInOtherYear(
   feeConfig: FeeConfig,
   grade: Grade,
   programKeahlian: ProgramKeahlian,
   currentTahunAjaran: string,
   name: string
-): string | null {
+): SimilarCategoryMatch | null {
   const typed = normalizeName(name)
   if (!typed) return null
   for (const [key, categories] of Object.entries(feeConfig)) {
     const parsed = parseClassKey(key)
     if (parsed.grade !== grade || parsed.programKeahlian !== programKeahlian) continue
     if (parsed.tahunAjaran === currentTahunAjaran) continue
-    if (categories.some((c) => normalizeName(c.name) === typed)) return parsed.tahunAjaran
+    const match = categories.find((c) => normalizeName(c.name) === typed)
+    if (match) return { tahunAjaran: parsed.tahunAjaran, category: match }
   }
   return null
 }
@@ -115,6 +135,10 @@ export default function FeeSettings() {
   const [addOpen, setAddOpen] = useState(false)
   const [addForm, setAddForm] = useState<AddForm>(EMPTY_ADD_FORM)
   const [addErrors, setAddErrors] = useState<string[]>([])
+  // Set only by clicking "Pakai Kode yang Sama" on the duplicate-name warning below — reset on
+  // every further edit to the name (see the input's onChange) so it can never silently stay
+  // "confirmed" for a match that no longer applies.
+  const [linkedCategoryKey, setLinkedCategoryKey] = useState<string | null>(null)
   const [confirmDeleteCat, setConfirmDeleteCat] = useState<FeeCategory | null>(null)
   const [addYearOpen, setAddYearOpen] = useState(false)
   const [addYearInput, setAddYearInput] = useState('')
@@ -157,12 +181,27 @@ export default function FeeSettings() {
   const key = classKey(selectedGrade, selectedProgram, selectedTahunAjaran)
   const categories = draft[key] ?? []
 
-  // Live warning while typing into "Tambah Kategori" — purely advisory (see JSX below), never
-  // blocks handleAddCategory.
-  const similarCategoryYear = useMemo(
+  // Live warning while typing into "Tambah Kategori" — purely advisory, never blocks
+  // handleAddCategory on its own. "Pakai Kode yang Sama" (below) is what actually acts on it.
+  const similarMatch = useMemo(
     () => findSimilarCategoryInOtherYear(feeConfig, selectedGrade, selectedProgram, selectedTahunAjaran, addForm.name),
     [feeConfig, selectedGrade, selectedProgram, selectedTahunAjaran, addForm.name]
   )
+
+  // Whether "Salin dari Tahun Sebelumnya" would actually find a source for selectedTahunAjaran
+  // — "YYYY/YYYY" tahun ajaran strings compare lexicographically = chronologically, same trick
+  // POST /fee-categories/copy-year uses server-side. Staff filling in the OLDEST tahun ajaran
+  // a Kelas has ever had is exactly the case where this is false — the duplicate-name warning
+  // below must not suggest an action that would just 404.
+  const hasEarlierYearData = useMemo(
+    () => Object.keys(feeConfig).some((k) => parseClassKey(k).tahunAjaran < selectedTahunAjaran),
+    [feeConfig, selectedTahunAjaran]
+  )
+
+  // True only while linkedCategoryKey still points at the CURRENT similarMatch — switching
+  // combos or editing the name back out from under a confirmed link falls back to "not linked"
+  // automatically rather than trusting a stale choice.
+  const isLinked = linkedCategoryKey !== null && similarMatch !== null && linkedCategoryKey === similarMatch.category.id
 
   const handleAmountChange = (categoryId: string, value: string) => {
     const num = Math.max(0, Number(value) || 0)
@@ -190,6 +229,7 @@ export default function FeeSettings() {
   const openAdd = () => {
     setAddForm(EMPTY_ADD_FORM)
     setAddErrors([])
+    setLinkedCategoryKey(null)
     setAddOpen(true)
   }
 
@@ -200,13 +240,20 @@ export default function FeeSettings() {
     if (categories.some((c) => c.name.trim().toLowerCase() === name.toLowerCase())) {
       errs.push('Kategori dengan nama ini sudah ada untuk kombinasi ini.')
     }
+    if (isLinked && similarMatch && categories.some((c) => c.id === similarMatch.category.id)) {
+      errs.push('Kode internal ini sudah dipakai kategori lain di kombinasi ini — tidak bisa disambungkan.')
+    }
     if (errs.length > 0) {
       setAddErrors(errs)
       return
     }
 
     const newCategory: FeeCategory = {
-      id: generateCategoryId(categories, name),
+      // "Pakai Kode yang Sama" reuses the matched category's own category_key verbatim,
+      // instead of slugifying whatever was typed here — this is the whole fix: two categories
+      // that are really the same thing across tahun ajaran end up sharing one key, instead of
+      // audit-category-keys.js finding them apart later.
+      id: isLinked && similarMatch ? similarMatch.category.id : generateCategoryId(categories, name),
       name,
       amount: Math.max(0, Number(addForm.amount) || 0),
       type: addForm.type,
@@ -467,17 +514,42 @@ export default function FeeSettings() {
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Nama Kategori</label>
                 <input
                   value={addForm.name}
-                  onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
+                  onChange={(e) => {
+                    setAddForm((f) => ({ ...f, name: e.target.value }))
+                    setLinkedCategoryKey(null)
+                  }}
                   placeholder="mis. Study Tour"
                   className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
                 />
-                {similarCategoryYear && (
-                  <p className="flex items-start gap-1.5 text-xs text-amber-600 mt-1.5">
-                    <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                    Kategori bernama serupa sudah ada di tahun ajaran {similarCategoryYear} dengan kode internal
-                    berbeda. Disarankan pakai &quot;Salin dari Tahun Sebelumnya&quot; agar kategori ini otomatis
-                    tersambung dengan riwayat yang sama, alih-alih membuat kategori baru yang terpisah.
-                  </p>
+                {similarMatch && !isLinked && (
+                  <div className="mt-1.5 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                    <p className="flex items-start gap-1.5 text-xs text-amber-700">
+                      <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                      <span>
+                        Kategori bernama serupa sudah ada di tahun ajaran {similarMatch.tahunAjaran} dengan kode
+                        internal berbeda.{' '}
+                        {hasEarlierYearData
+                          ? 'Disarankan pakai "Salin dari Tahun Sebelumnya" agar seluruh kategori tahun ini otomatis tersambung, atau sambungkan kategori ini saja di bawah.'
+                          : 'Sambungkan kategori ini ke riwayat yang sama di bawah, alih-alih membuat kategori baru yang terpisah.'}
+                      </span>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setLinkedCategoryKey(similarMatch.category.id)}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white hover:bg-amber-100 transition px-3 py-1.5 text-xs font-semibold text-amber-800"
+                    >
+                      <Link2 size={13} /> Pakai Kode yang Sama
+                    </button>
+                  </div>
+                )}
+                {isLinked && similarMatch && (
+                  <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-700">
+                    <CheckCircle2 size={13} className="shrink-0 mt-0.5" />
+                    <span>
+                      Kategori ini akan tersambung dengan riwayat &quot;{similarMatch.category.name}&quot; dari
+                      tahun ajaran {similarMatch.tahunAjaran}.
+                    </span>
+                  </div>
                 )}
               </div>
               <div>
